@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>将棋</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #2c1810; color: #fff; font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+#app { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
+#status { font-size: 18px; color: #ffcc00; min-height: 28px; }
+#game-area { display: flex; gap: 12px; align-items: stretch; }
+#center-column { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.hand-area { background: #3a2518; border: 2px solid #8b6914; border-radius: 8px; padding: 5px 10px; display: flex; align-items: center; gap: 5px; min-height: 38px; flex-wrap: wrap; }
+.hand-area h3 { font-size: 13px; color: #e8d4a0; white-space: nowrap; margin-right: 2px; }
+.hand-piece { display: flex; align-items: center; gap: 2px; padding: 3px 7px; cursor: pointer; border-radius: 4px; font-size: 15px; color: #1a0a00; background: #e8d4a0; white-space: nowrap; }
+.hand-piece:hover { background: #ffeabb; }
+.hand-piece.selected { background: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
+.hand-piece .count { font-size: 12px; color: #666; }
+#board-container { position: relative; }
+#board { display: grid; grid-template-columns: repeat(var(--board-cols, 9), var(--cell-size, 58px)); grid-template-rows: repeat(9, var(--cell-size, 58px)); border: 3px solid #8b6914; background: #d4a856; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+.cell { width: var(--cell-size, 58px); height: var(--cell-size, 58px); border: 1px solid #b8860b; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; font-size: var(--piece-font, 24px); font-weight: bold; }
+.cell:hover { background: rgba(255,255,255,0.15); }
+.cell .piece { display: flex; align-items: center; justify-content: center; width: calc(var(--cell-size, 58px) - 10px); height: calc(var(--cell-size, 58px) - 10px); border-radius: 4px; user-select: none; }
+.cell .piece.sente { color: #1a0a00; }
+.cell .piece.gote { color: #1a0a00; transform: rotate(180deg); }
+.cell.selected { background: rgba(255,204,0,0.5) !important; }
+.cell.movable { background: rgba(100,200,100,0.4); }
+.cell.movable::after { content: ''; position: absolute; width: 16px; height: 16px; background: rgba(100,200,100,0.7); border-radius: 50%; }
+.cell.movable.capture { background: rgba(255,100,100,0.35); }
+.cell.movable.capture::after { background: rgba(255,100,100,0.7); }
+.cell.check { box-shadow: inset 0 0 12px 4px rgba(255,0,0,0.6); }
+.cell.last-move { background: rgba(255,200,50,0.25); }
+.coord-top, .coord-bottom { display: grid; grid-template-columns: repeat(var(--board-cols, 9), var(--cell-size, 58px)); }
+.coord-left, .coord-right { display: flex; flex-direction: column; }
+.coord-top span, .coord-bottom span { text-align: center; font-size: 13px; color: #e8d4a0; padding: 2px 0; }
+.coord-left span, .coord-right span { width: 20px; height: var(--cell-size, 58px); display: flex; align-items: center; justify-content: center; font-size: 13px; color: #e8d4a0; }
+#score-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 56px; align-self: stretch; }
+.score-label { font-size: 11px; color: #e8d4a0; white-space: nowrap; text-align: center; }
+.bar-container { flex: 1; width: 20px; background: #1a4a6a; border-radius: 10px; overflow: hidden; border: 1px solid #555; position: relative; display: flex; flex-direction: column; justify-content: flex-end; }
+.bar-fill { width: 100%; background: linear-gradient(0deg, #e88a20, #ffcc00); border-radius: 0 0 10px 10px; transition: height 0.5s ease; }
+.time-info { padding-left: 8px; border-left: 1px solid #5a3a1a; font-size: 11px; color: #c0a878; line-height: 1.5; white-space: nowrap; margin-left: auto; }
+.time-info .time-row { display: flex; gap: 4px; }
+.time-info .time-label { color: #a08858; }
+.time-info .time-val { color: #e8d4a0; font-family: monospace; }
+#controls { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+#controls button { padding: 10px 14px; font-size: 14px; background: #8b6914; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+#controls button:hover { background: #a07a1a; }
+#controls button:disabled { background: #5a4a2a; color: #888; cursor: default; }
+#modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; justify-content: center; align-items: center; }
+#modal-overlay.show { display: flex; }
+#modal { background: #3a2518; border: 2px solid #8b6914; border-radius: 12px; padding: 24px 32px; text-align: center; }
+#modal p { font-size: 18px; margin-bottom: 16px; color: #e8d4a0; }
+#modal button { padding: 8px 24px; font-size: 15px; margin: 0 8px; background: #8b6914; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-family: inherit; }
+#modal button:hover { background: #a07a1a; }
+#modal .select-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0; font-size: 16px; color: #e8d4a0; }
+#modal .toggle-group { display: flex; gap: 0; }
+#modal .toggle-btn { padding: 6px 18px; font-size: 14px; border: 2px solid #8b6914; background: #2c1810; color: #aaa; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+#modal .toggle-btn:first-child { border-radius: 6px 0 0 6px; }
+#modal .toggle-btn:last-child { border-radius: 0 6px 6px 0; }
+#modal .toggle-btn.active { background: #8b6914; color: #fff; }
+#modal .toggle-btn:hover:not(.active) { background: #4a3018; }
+#modal .start-btn { margin-top: 18px; padding: 10px 40px; font-size: 17px; }
+.piece-char { position: relative; }
+@keyframes ai-piece-in {
+  0% { transform: scale(0.2); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes ai-piece-in-gote {
+  0% { transform: rotate(180deg) scale(0.2); opacity: 0; }
+  60% { transform: rotate(180deg) scale(1.15); opacity: 1; }
+  100% { transform: rotate(180deg) scale(1); opacity: 1; }
+}
+@keyframes ai-cell-pulse {
+  0% { background: rgba(255,170,0,0.6); }
+  40% { background: rgba(255,100,0,0.7); }
+  70% { background: rgba(255,170,0,0.5); }
+  100% { background: rgba(255,200,50,0.25); }
+}
+.cell.ai-animate { animation: ai-cell-pulse 0.7s ease-out; }
+.cell.ai-animate .piece.gote { animation: ai-piece-in-gote 0.5s ease-out; }
+.cell.ai-animate .piece.sente { animation: ai-piece-in 0.5s ease-out; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>将棋</h1>
+  <div id="status">先手の番です</div>
+  <div id="game-area">
+    <div id="score-bar">
+      <div class="score-label" id="score-gote-label">△後手: 500</div>
+      <div class="bar-container">
+        <div class="bar-fill" id="bar-sente" style="height:50%"></div>
+      </div>
+      <div class="score-label" id="score-sente-label">▲先手: 500</div>
+    </div>
+    <div id="center-column">
+      <div class="hand-area" id="gote-hand">
+        <h3>△後手持駒</h3>
+        <div class="time-info" id="gote-time"></div>
+      </div>
+      <div id="board-container">
+        <div class="coord-top" id="coord-top"></div>
+        <div style="display:flex">
+          <div class="coord-left" id="coord-left"></div>
+          <div id="board"></div>
+          <div class="coord-right" id="coord-right"></div>
+        </div>
+        <div class="coord-bottom" id="coord-bottom"></div>
+      </div>
+      <div class="hand-area" id="sente-hand">
+        <h3>▲先手持駒</h3>
+        <div class="time-info" id="sente-time"></div>
+      </div>
+    </div>
+    <div id="controls">
+      <button onclick="resetGame()">最初から</button>
+      <button id="btn-undo" onclick="undoMove()">◀ 待った</button>
+      <button id="btn-forward" onclick="forwardMove()" style="display:none">1手進む ▶</button>
+    </div>
+  </div>
+</div>
+<div id="modal-overlay">
+  <div id="modal">
+    <p id="modal-text"></p>
+    <div id="modal-buttons"></div>
+  </div>
+</div>
+
+<script>
+// Piece constants
+const EMPTY = 0;
+const FU=1, KY=2, KE=3, GI=4, KI=5, KA=6, HI=7, OU=8;
+const TO=9, NY=10, NK=11, NG=12, UM=13, RY=14;
+const HM=15; // 妃（王后将棋・王家将棋用）
+const WK=16; // 若（王家将棋用、未成り: 角+飛車の動き）
+const NW=17; // 成若（王の動き、第2の王として機能）
+
+const PIECE_NAMES = {
+  [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]:'角',[HI]:'飛',[OU]:'王',
+  [TO]:'と',[NY]:'杏',[NK]:'圭',[NG]:'全',[UM]:'馬',[RY]:'龍',
+  [HM]:'妃',[WK]:'若',[NW]:'王'
+};
+
+const PROMOTE_MAP = { [FU]:TO, [KY]:NY, [KE]:NK, [GI]:NG, [KA]:UM, [HI]:RY, [WK]:NW };
+const UNPROMOTE_MAP = { [TO]:FU, [NY]:KY, [NK]:KE, [NG]:GI, [UM]:KA, [RY]:HI, [NW]:WK };
+const HAND_PIECES = [HI, KA, KI, GI, KE, KY, FU, HM];
+const HAND_NAMES = { [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]:'角',[HI]:'飛',[HM]:'妃' };
+
+const PIECE_VALUES = {
+  [FU]:100,[KY]:300,[KE]:350,[GI]:450,[KI]:500,[KA]:650,[HI]:700,[OU]:10000,
+  [TO]:420,[NY]:400,[NK]:410,[NG]:460,[UM]:850,[RY]:950,
+  [HM]:600,[WK]:800,[NW]:9500
+};
+
+const SENTE = 1, GOTE = -1;
+let BOARD_COLS = 9;
+const BOARD_ROWS = 9;
+
+// Game state
+let board, senteHand, goteHand, turn, selected, selectedHand, gameOver, lastMove;
+let aiAnimTarget = null, animating = false;
+let history = [];
+let undoneHistory = []; // For AI vs AI forward/resume
+let senteType = 'human'; // 'human' | 'ai'
+let goteType = 'ai';     // 'human' | 'ai'
+let aiPaused = false;     // AI vs AI pause state
+let aiTimerId = null;     // setTimeout ID for pending AI move
+let gameVariant = 'normal'; // 'normal' | 'ougo' (王后将棋)
+
+// Timing state
+let senteThinkTotal = 0;  // cumulative ms
+let goteThinkTotal = 0;
+let senteThinkCurrent = 0; // current move ms
+let goteThinkCurrent = 0;
+let humanThinkTimer = null; // setInterval for human thinking
+let humanThinkStart = 0;
+
+function isHumanTurn() {
+  if (turn === SENTE) return senteType === 'human';
+  if (turn === GOTE) return goteType === 'human';
+  return false;
+}
+
+function isCurrentAI() {
+  if (turn === SENTE) return senteType === 'ai';
+  if (turn === GOTE) return goteType === 'ai';
+  return false;
+}
+
+function isNextAI() {
+  const next = -turn;
+  if (next === SENTE) return senteType === 'ai';
+  if (next === GOTE) return goteType === 'ai';
+  return false;
+}
+
+function isBothAI() {
+  return senteType === 'ai' && goteType === 'ai';
+}
+
+function turnName(t) {
+  return t === SENTE ? '先手' : '後手';
+}
+
+function formatTime(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m}分${s.toString().padStart(2,'0')}秒` : `${s}秒`;
+}
+
+function updateScoreDisplay() {
+  const rawScore = evaluate(board, senteHand, goteHand);
+  // Map raw score to 0-1000 per side. Raw score is SENTE-perspective.
+  // Clamp to reasonable range: -5000 to +5000 maps to 0-1000
+  const clampedRatio = Math.max(-1, Math.min(1, rawScore / 5000));
+  const senteScore = Math.round(500 + clampedRatio * 500);
+  const goteScore = 1000 - senteScore;
+  const sentePct = Math.max(2, Math.min(98, senteScore / 10));
+
+  document.getElementById('score-sente-label').textContent = `▲先手: ${senteScore}`;
+  document.getElementById('score-gote-label').textContent = `△後手: ${goteScore}`;
+  document.getElementById('bar-sente').style.height = sentePct + '%';
+}
+
+function updateTimeDisplay() {
+  const senteEl = document.getElementById('sente-time');
+  const goteEl = document.getElementById('gote-time');
+  senteEl.innerHTML = `
+    <div class="time-row"><span class="time-label">今手:</span><span class="time-val">${formatTime(senteThinkCurrent)}</span></div>
+    <div class="time-row"><span class="time-label">通算:</span><span class="time-val">${formatTime(senteThinkTotal + (turn === SENTE && !gameOver ? senteThinkCurrent : 0))}</span></div>
+  `;
+  goteEl.innerHTML = `
+    <div class="time-row"><span class="time-label">今手:</span><span class="time-val">${formatTime(goteThinkCurrent)}</span></div>
+    <div class="time-row"><span class="time-label">通算:</span><span class="time-val">${formatTime(goteThinkTotal + (turn === GOTE && !gameOver ? goteThinkCurrent : 0))}</span></div>
+  `;
+}
+
+function startHumanThinkTimer() {
+  stopHumanThinkTimer();
+  if (turn === SENTE) senteThinkCurrent = 0;
+  else goteThinkCurrent = 0;
+  humanThinkStart = Date.now();
+  updateTimeDisplay();
+  humanThinkTimer = setInterval(() => {
+    const elapsed = Date.now() - humanThinkStart;
+    if (turn === SENTE) senteThinkCurrent = elapsed;
+    else goteThinkCurrent = elapsed;
+    updateTimeDisplay();
+  }, 200);
+}
+
+function stopHumanThinkTimer() {
+  if (humanThinkTimer) {
+    clearInterval(humanThinkTimer);
+    humanThinkTimer = null;
+  }
+}
+
+function commitThinkTime(side, ms) {
+  if (side === SENTE) {
+    senteThinkTotal += ms;
+    senteThinkCurrent = 0;
+  } else {
+    goteThinkTotal += ms;
+    goteThinkCurrent = 0;
+  }
+}
+
+function initBoard() {
+  BOARD_COLS = 9;
+  board = Array.from({length: BOARD_ROWS}, () => Array(BOARD_COLS).fill(EMPTY));
+
+  if (gameVariant === 'ouke') {
+    // 王家将棋: 9×9盤面
+    // 後手1段目: 香 桂 銀 金 王 妃 銀 桂 香 (ミラー配置)
+    board[0][0]=-KY; board[0][1]=-KE; board[0][2]=-GI; board[0][3]=-KI;
+    board[0][4]=-OU; board[0][5]=-HM; board[0][6]=-GI; board[0][7]=-KE; board[0][8]=-KY;
+    board[1][1] = -HI; board[1][4] = -WK; board[1][7] = -KA;
+    for (let c = 0; c < BOARD_COLS; c++) board[2][c] = -FU;
+    // 先手: 香桂銀妃王金銀桂香 / 空角空空若空空飛空 / 歩×9
+    for (let c = 0; c < BOARD_COLS; c++) board[6][c] = FU;
+    board[7][1] = KA; board[7][4] = WK; board[7][7] = HI;
+    board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=HM;
+    board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
+  } else {
+    // 通常将棋・王后将棋: 9×9盤面
+    board[0][0]=-KY; board[0][1]=-KE; board[0][2]=-GI; board[0][3]=-KI;
+    board[0][4]=-OU; board[0][5]=-KI; board[0][6]=-GI; board[0][7]=-KE; board[0][8]=-KY;
+    board[1][1] = -HI; board[1][7] = -KA;
+    for (let c = 0; c < BOARD_COLS; c++) board[2][c] = -FU;
+    for (let c = 0; c < BOARD_COLS; c++) board[6][c] = FU;
+    board[7][1] = KA; board[7][7] = HI;
+    board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
+    board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
+    if (gameVariant === 'ougo') {
+      board[7][4] = HM;  // 先手の妃
+      board[1][4] = -HM; // 後手の妃
+    }
+  }
+}
+
+function resetGame() {
+  if (aiTimerId) { clearTimeout(aiTimerId); aiTimerId = null; }
+  stopHumanThinkTimer();
+  initBoard();
+  senteHand = {}; goteHand = {};
+  turn = SENTE;
+  selected = null; selectedHand = null;
+  gameOver = false; lastMove = null;
+  aiAnimTarget = null; animating = false;
+  aiPaused = false;
+  history = [];
+  undoneHistory = [];
+  senteThinkTotal = 0; goteThinkTotal = 0;
+  senteThinkCurrent = 0; goteThinkCurrent = 0;
+  render();
+  updateScoreDisplay();
+  updateTimeDisplay();
+  updateControls();
+  showPlayerSelectDialog();
+}
+
+function showPlayerSelectDialog() {
+  const modal = document.getElementById('modal-overlay');
+  const text = document.getElementById('modal-text');
+  const buttons = document.getElementById('modal-buttons');
+  text.textContent = 'プレイヤー設定';
+
+  let selSente = senteType;
+  let selGote = goteType;
+  let selVariant = gameVariant;
+
+  buttons.innerHTML = `
+    <div class="select-row">
+      <span>将棋の種類：</span>
+      <div class="toggle-group" id="variant-toggle">
+        <div class="toggle-btn ${selVariant === 'normal' ? 'active' : ''}" data-val="normal">通常将棋</div>
+        <div class="toggle-btn ${selVariant === 'ougo' ? 'active' : ''}" data-val="ougo">王后将棋</div>
+        <div class="toggle-btn ${selVariant === 'ouke' ? 'active' : ''}" data-val="ouke">王家将棋</div>
+      </div>
+    </div>
+    <div class="select-row">
+      <span>▲先手（下側）：</span>
+      <div class="toggle-group" id="sente-toggle">
+        <div class="toggle-btn ${selSente === 'human' ? 'active' : ''}" data-val="human">人間</div>
+        <div class="toggle-btn ${selSente === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
+      </div>
+    </div>
+    <div class="select-row">
+      <span>△後手（上側）：</span>
+      <div class="toggle-group" id="gote-toggle">
+        <div class="toggle-btn ${selGote === 'human' ? 'active' : ''}" data-val="human">人間</div>
+        <div class="toggle-btn ${selGote === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
+      </div>
+    </div>
+    <button class="start-btn" id="start-game-btn">対局開始</button>
+  `;
+
+  // Toggle handlers
+  function setupToggle(id, setter) {
+    buttons.querySelector('#' + id).addEventListener('click', (e) => {
+      const btn = e.target.closest('.toggle-btn');
+      if (!btn) return;
+      setter(btn.dataset.val);
+      buttons.querySelectorAll('#' + id + ' .toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  }
+  setupToggle('variant-toggle', v => selVariant = v);
+  setupToggle('sente-toggle', v => selSente = v);
+  setupToggle('gote-toggle', v => selGote = v);
+
+  buttons.querySelector('#start-game-btn').addEventListener('click', () => {
+    senteType = selSente;
+    goteType = selGote;
+    gameVariant = selVariant;
+    initBoard();
+    render();
+    hideModal();
+    updateControls();
+    updateStatus();
+    render();
+    updateScoreDisplay();
+    updateTimeDisplay();
+    // If first turn is AI, start
+    if (senteType === 'ai') {
+      aiTimerId = setTimeout(aiMove, 300);
+    } else {
+      startHumanThinkTimer();
+    }
+  });
+
+  modal.classList.add('show');
+}
+
+function pushHistory() {
+  history.push({
+    board: cloneBoard(board),
+    senteHand: {...senteHand},
+    goteHand: {...goteHand},
+    turn, lastMove, gameOver
+  });
+  // Clear forward history when a new move is made
+  undoneHistory = [];
+}
+
+function undoMove() {
+  if (history.length === 0) return;
+
+  // Cancel pending AI move
+  if (aiTimerId) { clearTimeout(aiTimerId); aiTimerId = null; }
+
+  if (isBothAI()) {
+    // AI vs AI: set pause flag immediately (even during animation)
+    aiPaused = true;
+    if (animating) {
+      // AI is currently thinking/animating - just pause, undo will happen after animation
+      updateStatus('一時停止中...');
+      updateControls();
+      return;
+    }
+    const state = history.pop();
+    undoneHistory.push({
+      board: cloneBoard(board),
+      senteHand: {...senteHand},
+      goteHand: {...goteHand},
+      turn, lastMove, gameOver
+    });
+    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    selected = null; selectedHand = null;
+    render();
+    updateScoreDisplay();
+    updateTimeDisplay();
+    updateStatus('一時停止中 - ' + turnName(turn) + 'の番');
+    updateControls();
+    return;
+  }
+
+  if (animating) return;
+
+  const bothHuman = (senteType === 'human' && goteType === 'human');
+  if (bothHuman) {
+    // Human vs Human: 1 step back
+    const state = history.pop();
+    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+  } else {
+    // Human vs AI: 2 steps back (AI + human)
+    if (history.length >= 2) {
+      history.pop(); // AI's move
+      const state = history.pop(); // Human's move
+      board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+      turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    } else {
+      const state = history.pop();
+      board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+      turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    }
+  }
+  selected = null; selectedHand = null;
+  render();
+  updateScoreDisplay();
+  updateTimeDisplay();
+  updateStatus();
+  updateControls();
+}
+
+function forwardMove() {
+  if (animating) return;
+
+  // Resume from pause with no undone moves
+  if (undoneHistory.length === 0 && aiPaused) {
+    aiPaused = false;
+    updateControls();
+    if (!gameOver && isCurrentAI()) {
+      aiTimerId = setTimeout(aiMove, 500);
+    } else {
+      updateStatus();
+    }
+    return;
+  }
+
+  if (undoneHistory.length === 0) return;
+
+  if (undoneHistory.length === 1) {
+    // This is the last forward step = "Resume"
+    const state = undoneHistory.pop();
+    history.push({
+      board: cloneBoard(board),
+      senteHand: {...senteHand},
+      goteHand: {...goteHand},
+      turn, lastMove, gameOver
+    });
+    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    selected = null; selectedHand = null;
+    aiPaused = false;
+    render();
+    updateScoreDisplay();
+    updateTimeDisplay();
+    updateControls();
+    if (!gameOver && isCurrentAI()) {
+      aiTimerId = setTimeout(aiMove, 500);
+    } else {
+      updateStatus();
+    }
+    return;
+  }
+
+  // Regular forward
+  const state = undoneHistory.pop();
+  history.push({
+    board: cloneBoard(board),
+    senteHand: {...senteHand},
+    goteHand: {...goteHand},
+    turn, lastMove, gameOver
+  });
+  board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+  turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+  selected = null; selectedHand = null;
+  render();
+  updateScoreDisplay();
+  updateTimeDisplay();
+  updateStatus('一時停止中 - ' + turnName(turn) + 'の番');
+  updateControls();
+}
+
+function updateControls() {
+  const btnForward = document.getElementById('btn-forward');
+  const btnUndo = document.getElementById('btn-undo');
+
+  if (isBothAI()) {
+    btnForward.style.display = '';
+    if (undoneHistory.length === 0 && !aiPaused) {
+      btnForward.style.display = 'none';
+    } else if (undoneHistory.length === 0) {
+      btnForward.textContent = '再開 ▶';
+      btnForward.disabled = false;
+    } else if (undoneHistory.length === 1) {
+      btnForward.textContent = '再開 ▶';
+      btnForward.disabled = false;
+    } else {
+      btnForward.textContent = '1手進む ▶';
+      btnForward.disabled = false;
+    }
+    btnUndo.textContent = '◀ 一手戻す';
+    btnUndo.disabled = history.length === 0;
+  } else {
+    btnForward.style.display = 'none';
+    btnUndo.textContent = '◀ 待った';
+    btnUndo.disabled = history.length === 0;
+  }
+}
+
+function getPieceOwner(val) {
+  if (val > 0) return SENTE;
+  if (val < 0) return GOTE;
+  return 0;
+}
+
+function absPiece(val) { return Math.abs(val); }
+
+function baseType(p) {
+  const a = Math.abs(p);
+  return UNPROMOTE_MAP[a] || a;
+}
+
+function canPromote(piece) {
+  const a = Math.abs(piece);
+  return PROMOTE_MAP[a] !== undefined;
+}
+
+function isPromoted(piece) {
+  const a = Math.abs(piece);
+  return UNPROMOTE_MAP[a] !== undefined;
+}
+
+// Movement rules
+function getPieceMoves(piece, r, c, boardState) {
+  const moves = [];
+  const a = absPiece(piece);
+  const owner = getPieceOwner(piece);
+  const dir = owner === SENTE ? -1 : 1;
+
+  function addMove(nr, nc) {
+    if (nr < 0 || nr >= BOARD_ROWS || nc < 0 || nc >= BOARD_COLS) return;
+    const target = boardState[nr][nc];
+    if (getPieceOwner(target) === owner) return;
+    moves.push([nr, nc]);
+  }
+
+  function addLine(dr, dc) {
+    let nr = r + dr, nc = c + dc;
+    while (nr >= 0 && nr < BOARD_ROWS && nc >= 0 && nc < BOARD_COLS) {
+      const target = boardState[nr][nc];
+      if (getPieceOwner(target) === owner) break;
+      moves.push([nr, nc]);
+      if (target !== EMPTY) break;
+      nr += dr; nc += dc;
+    }
+  }
+
+  switch (a) {
+    case FU: addMove(r+dir, c); break;
+    case KY:
+      addLine(dir, 0); break;
+    case KE:
+      addMove(r+2*dir, c-1); addMove(r+2*dir, c+1); break;
+    case GI:
+      addMove(r+dir, c-1); addMove(r+dir, c); addMove(r+dir, c+1);
+      addMove(r-dir, c-1); addMove(r-dir, c+1); break;
+    case KI: case TO: case NY: case NK: case NG:
+      addMove(r+dir, c-1); addMove(r+dir, c); addMove(r+dir, c+1);
+      addMove(r, c-1); addMove(r, c+1); addMove(r-dir, c); break;
+    case KA:
+      addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1); break;
+    case HI:
+      addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1); break;
+    case UM:
+      addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
+      addMove(r-1,c); addMove(r+1,c); addMove(r,c-1); addMove(r,c+1); break;
+    case RY:
+      addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
+      addMove(r-1,c-1); addMove(r-1,c+1); addMove(r+1,c-1); addMove(r+1,c+1); break;
+    case WK: // 若: 角+飛車の動き（チェスのクイーン）
+      addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
+      addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
+      break;
+    case OU: case HM: case NW: // 王・妃・成若: 8方向1マス
+      for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
+        if (dr===0 && dc===0) continue;
+        addMove(r+dr, c+dc);
+      }
+      break;
+  }
+  return moves;
+}
+
+function findAllKings(boardState, owner) {
+  const kings = [];
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    const a = absPiece(boardState[r][c]);
+    if (getPieceOwner(boardState[r][c]) === owner && (a === OU || a === NW)) {
+      kings.push([r, c]);
+    }
+  }
+  return kings;
+}
+
+function findKing(boardState, owner) {
+  // Returns first king found (OU or NW)
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    const a = absPiece(boardState[r][c]);
+    if (getPieceOwner(boardState[r][c]) === owner && (a === OU || a === NW)) return [r, c];
+  }
+  return null;
+}
+
+function isInCheck(boardState, owner) {
+  const kings = findAllKings(boardState, owner);
+  if (kings.length === 0) return true; // 王がいない = 負け
+  if (kings.length >= 2) return false;  // 2枚以上 = チェック不可（片方取られてもOK）
+  // 1枚の場合: 従来通りのチェック判定
+  const king = kings[0];
+  const opp = -owner;
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) === opp) {
+      const moves = getPieceMoves(boardState[r][c], r, c, boardState);
+      for (const [mr, mc] of moves) {
+        if (mr === king[0] && mc === king[1]) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function cloneBoard(b) { return b.map(row => [...row]); }
+function cloneHand(h) { return {...h}; }
+
+function tryMove(boardState, fr, fc, tr, tc) {
+  const nb = cloneBoard(boardState);
+  const captured = nb[tr][tc];
+  nb[tr][tc] = nb[fr][fc];
+  nb[fr][fc] = EMPTY;
+  return { board: nb, captured };
+}
+
+function isLegalMove(boardState, fr, fc, tr, tc, owner) {
+  const { board: nb } = tryMove(boardState, fr, fc, tr, tc);
+  return !isInCheck(nb, owner);
+}
+
+// Check if piece must promote (can't move further)
+function mustPromote(piece, tr) {
+  const a = absPiece(piece);
+  const owner = getPieceOwner(piece);
+  if (owner === SENTE) {
+    if (a === FU || a === KY) return tr === 0;
+    if (a === KE) return tr <= 1;
+  } else {
+    if (a === FU || a === KY) return tr === 8;
+    if (a === KE) return tr >= 7;
+  }
+  return false;
+}
+
+function shouldAskPromote(piece, fr, tr) {
+  if (!canPromote(piece)) return false;
+  const owner = getPieceOwner(piece);
+  if (owner === SENTE) return fr <= 2 || tr <= 2;
+  return fr >= 6 || tr >= 6;
+}
+
+// Nifu check: two unpromoted pawns in same column
+function hasNifu(boardState, col, owner) {
+  for (let r=0; r<BOARD_ROWS; r++) {
+    if (boardState[r][col] === owner * FU) return true;
+  }
+  return false;
+}
+
+// Drop validation
+function getDropSquares(boardState, pieceType, owner) {
+  const squares = [];
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (boardState[r][c] !== EMPTY) continue;
+    if (owner === SENTE) {
+      if ((pieceType === FU || pieceType === KY) && r === 0) continue;
+      if (pieceType === KE && r <= 1) continue;
+    } else {
+      if ((pieceType === FU || pieceType === KY) && r === 8) continue;
+      if (pieceType === KE && r >= 7) continue;
+    }
+    if (pieceType === FU && hasNifu(boardState, c, owner)) continue;
+    if (pieceType === FU) {
+      const nb = cloneBoard(boardState);
+      nb[r][c] = owner * FU;
+      if (isInCheck(nb, -owner)) {
+        if (isCheckmatePosition(nb, -owner)) continue;
+      }
+    }
+    const nb = cloneBoard(boardState);
+    nb[r][c] = owner * pieceType;
+    if (isInCheck(nb, owner)) continue;
+    squares.push([r, c]);
+  }
+  return squares;
+}
+
+function isCheckmatePosition(boardState, owner) {
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) === owner) {
+      const moves = getPieceMoves(boardState[r][c], r, c, boardState);
+      for (const [mr, mc] of moves) {
+        if (isLegalMove(boardState, r, c, mr, mc, owner)) return false;
+      }
+    }
+  }
+  const hand = owner === SENTE ? senteHand : goteHand;
+  for (const pt of HAND_PIECES) {
+    if ((hand[pt] || 0) > 0) {
+      const drops = getDropSquares(boardState, pt, owner);
+      if (drops.length > 0) return false;
+    }
+  }
+  return true;
+}
+
+function getAllLegalMoves(boardState, owner, sHand, gHand) {
+  const moves = [];
+  const hand = owner === SENTE ? sHand : gHand;
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) !== owner) continue;
+    const piece = boardState[r][c];
+    const targets = getPieceMoves(piece, r, c, boardState);
+    for (const [tr, tc] of targets) {
+      if (!isLegalMove(boardState, r, c, tr, tc, owner)) continue;
+      const promote = shouldAskPromote(piece, r, tr) && canPromote(piece);
+      const must = mustPromote(piece, tr);
+      if (promote && !must) {
+        moves.push({ type:'move', fr:r, fc:c, tr, tc, promote:true });
+        moves.push({ type:'move', fr:r, fc:c, tr, tc, promote:false });
+      } else if (must) {
+        moves.push({ type:'move', fr:r, fc:c, tr, tc, promote:true });
+      } else {
+        moves.push({ type:'move', fr:r, fc:c, tr, tc, promote:false });
+      }
+    }
+  }
+  for (const pt of HAND_PIECES) {
+    if ((hand[pt] || 0) > 0) {
+      const squares = getDropSquares(boardState, pt, owner);
+      for (const [r, c] of squares) {
+        moves.push({ type:'drop', piece:pt, tr:r, tc:c });
+      }
+    }
+  }
+  return moves;
+}
+
+function applyMove(boardState, move, sHand, gHand, owner) {
+  const nb = cloneBoard(boardState);
+  const nsh = cloneHand(sHand);
+  const ngh = cloneHand(gHand);
+  const myHand = owner === SENTE ? nsh : ngh;
+
+  if (move.type === 'move') {
+    const captured = nb[move.tr][move.tc];
+    nb[move.tr][move.tc] = nb[move.fr][move.fc];
+    nb[move.fr][move.fc] = EMPTY;
+    if (move.promote) {
+      const a = absPiece(nb[move.tr][move.tc]);
+      nb[move.tr][move.tc] = owner * PROMOTE_MAP[a];
+    }
+    if (captured !== EMPTY) {
+      const bt = baseType(captured);
+      if (bt !== WK) { // 若は手駒として使えない
+        myHand[bt] = (myHand[bt] || 0) + 1;
+      }
+    }
+  } else {
+    nb[move.tr][move.tc] = owner * move.piece;
+    myHand[move.piece] = (myHand[move.piece] || 0) - 1;
+    if (myHand[move.piece] <= 0) delete myHand[move.piece];
+  }
+  return { board: nb, senteHand: nsh, goteHand: ngh };
+}
+
+// AI evaluation
+function evaluate(boardState, sHand, gHand) {
+  let score = 0;
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    const p = boardState[r][c];
+    if (p === 0) continue;
+    const owner = getPieceOwner(p);
+    const a = absPiece(p);
+    let val = PIECE_VALUES[a] || 0;
+    if (a === FU) {
+      if (owner === SENTE) val += (6 - r) * 2;
+      else val += (r - 2) * 2;
+    }
+    if (a === OU || a === NW) {
+      const centerDist = Math.abs(c - Math.floor(BOARD_COLS / 2));
+      val += centerDist * 5;
+    }
+    score += owner * val;
+  }
+  for (const pt of HAND_PIECES) {
+    score += ((sHand[pt]||0) * (PIECE_VALUES[pt] * 0.85));
+    score -= ((gHand[pt]||0) * (PIECE_VALUES[pt] * 0.85));
+  }
+  return score;
+}
+
+// Minimax with alpha-beta
+const MAX_DEPTH = 5;
+function minimax(boardState, sHand, gHand, depth, alpha, beta, maximizing, evalOwner) {
+  const owner = maximizing ? SENTE : GOTE;
+  if (depth === 0) return { score: evaluate(boardState, sHand, gHand) };
+
+  let moves = getAllLegalMoves(boardState, owner, sHand, gHand);
+  if (moves.length === 0) {
+    if (isInCheck(boardState, owner)) {
+      return { score: maximizing ? -99999 + (MAX_DEPTH-depth)*100 : 99999 - (MAX_DEPTH-depth)*100 };
+    }
+    return { score: 0 };
+  }
+
+  moves.sort((a, b) => {
+    let sa = 0, sb = 0;
+    if (a.type === 'move' && boardState[a.tr][a.tc] !== EMPTY) sa += 1000 + (PIECE_VALUES[absPiece(boardState[a.tr][a.tc])] || 0);
+    if (b.type === 'move' && boardState[b.tr][b.tc] !== EMPTY) sb += 1000 + (PIECE_VALUES[absPiece(boardState[b.tr][b.tc])] || 0);
+    if (a.promote) sa += 500;
+    if (b.promote) sb += 500;
+    if (a.type === 'move') sa += 100;
+    if (b.type === 'move') sb += 100;
+    return sb - sa;
+  });
+
+  if (depth <= 2) {
+    const boardMoves = moves.filter(m => m.type === 'move');
+    const dropMoves = moves.filter(m => m.type === 'drop').slice(0, 8);
+    moves = boardMoves.concat(dropMoves);
+  }
+
+  let bestMove = moves[0];
+  if (maximizing) {
+    let maxScore = -Infinity;
+    for (const move of moves) {
+      const result = applyMove(boardState, move, sHand, gHand, owner);
+      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth-1, alpha, beta, false, evalOwner);
+      if (score > maxScore) { maxScore = score; bestMove = move; }
+      alpha = Math.max(alpha, score);
+      if (beta <= alpha) break;
+    }
+    return { score: maxScore, move: bestMove };
+  } else {
+    let minScore = Infinity;
+    for (const move of moves) {
+      const result = applyMove(boardState, move, sHand, gHand, owner);
+      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth-1, alpha, beta, true, evalOwner);
+      if (score < minScore) { minScore = score; bestMove = move; }
+      beta = Math.min(beta, score);
+      if (beta <= alpha) break;
+    }
+    return { score: minScore, move: bestMove };
+  }
+}
+
+function aiMove() {
+  aiTimerId = null;
+  if (gameOver || aiPaused) return;
+  animating = true;
+
+  const currentTurn = turn;
+  const maximizing = (currentTurn === SENTE);
+  const aiSide = turnName(currentTurn);
+
+  // Start thinking timer
+  const thinkStart = Date.now();
+  if (currentTurn === SENTE) senteThinkCurrent = 0;
+  else goteThinkCurrent = 0;
+  const thinkMsg = () => {
+    const checkStr = isInCheck(board, currentTurn) ? '王手！ ' : '';
+    if (isBothAI()) return checkStr + 'AI対局中（' + aiSide + '思考中）';
+    return checkStr + 'AIが考えています';
+  };
+  updateStatus(thinkMsg() + '...');
+  const thinkTimer = setInterval(() => {
+    const elapsedMs = Date.now() - thinkStart;
+    if (currentTurn === SENTE) senteThinkCurrent = elapsedMs;
+    else goteThinkCurrent = elapsedMs;
+    const dispSec = Math.floor(elapsedMs / 1000);
+    updateStatus(thinkMsg() + `... (${dispSec}秒)`);
+    updateTimeDisplay();
+  }, 200);
+
+  // Run AI in next tick to allow UI to update
+  setTimeout(() => {
+    const result = minimax(board, senteHand, goteHand, 5, -Infinity, Infinity, maximizing, currentTurn);
+    clearInterval(thinkTimer);
+    const thinkMs = Date.now() - thinkStart;
+    commitThinkTime(currentTurn, thinkMs);
+
+    if (!result.move) {
+      gameOver = true;
+      animating = false;
+      const winner = turnName(-currentTurn);
+      updateStatus(aiSide + 'の負けです。' + winner + 'の勝ち！');
+      updateControls();
+      return;
+    }
+    pushHistory();
+    const move = result.move;
+    const applied = applyMove(board, move, senteHand, goteHand, currentTurn);
+    board = applied.board;
+    senteHand = applied.senteHand;
+    goteHand = applied.goteHand;
+
+    if (move.type === 'move') {
+      lastMove = { fr: move.fr, fc: move.fc, tr: move.tr, tc: move.tc };
+    } else {
+      lastMove = { tr: move.tr, tc: move.tc };
+    }
+
+    turn = -currentTurn;
+    aiAnimTarget = { r: move.tr, c: move.tc };
+    render();
+
+    // Check results after animation
+    setTimeout(() => {
+      aiAnimTarget = null;
+      animating = false;
+
+      // If paused during AI thinking, stop here and allow undo
+      if (aiPaused) {
+        render();
+        updateStatus('一時停止中 - ' + turnName(turn) + 'の番');
+        updateControls();
+        return;
+      }
+
+      checkAfterMove();
+    }, 700);
+  }, 50);
+}
+
+// Unified post-move check
+function checkAfterMove() {
+  const nextPlayer = turn;
+  const nextMoves = getAllLegalMoves(board, nextPlayer, senteHand, goteHand);
+
+  updateScoreDisplay();
+  updateTimeDisplay();
+
+  if (nextMoves.length === 0) {
+    gameOver = true;
+    stopHumanThinkTimer();
+    render();
+    if (isInCheck(board, nextPlayer)) {
+      const winner = turnName(-nextPlayer);
+      updateStatus('詰みです。' + winner + 'の勝ち！');
+    } else {
+      updateStatus('引き分け（ステイルメイト）');
+    }
+    updateControls();
+    return;
+  }
+
+  render();
+
+  if (isCurrentAI() && !aiPaused) {
+    // Next turn is AI
+    const delay = isBothAI() ? 800 : 300;
+    aiTimerId = setTimeout(aiMove, delay);
+  } else if (aiPaused) {
+    updateStatus('一時停止中 - ' + turnName(turn) + 'の番');
+    updateControls();
+  } else {
+    // Next turn is human
+    startHumanThinkTimer();
+    const name = turnName(turn);
+    if (isInCheck(board, turn)) {
+      updateStatus('王手！ ' + name + 'の番です');
+    } else {
+      updateStatus(name + 'の番です');
+    }
+  }
+  updateControls();
+}
+
+// Rendering
+function render() {
+  renderBoard();
+  renderHand('sente');
+  renderHand('gote');
+}
+
+function renderBoard() {
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+  // Set CSS variables for dynamic board size
+  const cellSize = BOARD_COLS === 11 ? 48 : 58;
+  const pieceFont = BOARD_COLS === 11 ? 20 : 24;
+  document.documentElement.style.setProperty('--cell-size', cellSize + 'px');
+  document.documentElement.style.setProperty('--board-cols', BOARD_COLS);
+  document.documentElement.style.setProperty('--piece-font', pieceFont + 'px');
+  const inCheck = isInCheck(board, turn);
+  const kingPos = findKing(board, turn);
+
+  for (let r = 0; r < BOARD_ROWS; r++) {
+    for (let c = 0; c < BOARD_COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+
+      if (aiAnimTarget && aiAnimTarget.r === r && aiAnimTarget.c === c) {
+        cell.classList.add('ai-animate');
+      }
+
+      if (lastMove) {
+        if ((lastMove.tr === r && lastMove.tc === c) || (lastMove.fr === r && lastMove.fc === c)) {
+          cell.classList.add('last-move');
+        }
+      }
+
+      if (inCheck && kingPos && kingPos[0] === r && kingPos[1] === c) {
+        cell.classList.add('check');
+      }
+
+      if (selected && selected[0] === r && selected[1] === c) {
+        cell.classList.add('selected');
+      }
+
+      if (selected && !selectedHand) {
+        const piece = board[selected[0]][selected[1]];
+        const moves = getPieceMoves(piece, selected[0], selected[1], board);
+        for (const [mr, mc] of moves) {
+          if (mr === r && mc === c && isLegalMove(board, selected[0], selected[1], mr, mc, turn)) {
+            cell.classList.add('movable');
+            if (board[r][c] !== EMPTY) cell.classList.add('capture');
+          }
+        }
+      }
+      if (selectedHand) {
+        const drops = getDropSquares(board, selectedHand, turn);
+        for (const [dr, dc] of drops) {
+          if (dr === r && dc === c) cell.classList.add('movable');
+        }
+      }
+
+      const p = board[r][c];
+      if (p !== EMPTY) {
+        const pieceEl = document.createElement('div');
+        pieceEl.className = 'piece ' + (getPieceOwner(p) === SENTE ? 'sente' : 'gote');
+        const a = absPiece(p);
+        const isPromo = isPromoted(p);
+        pieceEl.textContent = PIECE_NAMES[a];
+        if (isPromo) pieceEl.style.color = '#cc0000';
+        if ((a === OU || a === NW) && getPieceOwner(p) === GOTE) {
+          pieceEl.textContent = '玉';
+        }
+        cell.appendChild(pieceEl);
+      }
+
+      cell.addEventListener('click', () => onCellClick(r, c));
+      boardEl.appendChild(cell);
+    }
+  }
+
+  const fullWidthDigits = '０１２３４５６７８９';
+  const colNums = [];
+  for (let i = BOARD_COLS; i >= 1; i--) {
+    colNums.push(i >= 10 ? String(i) : fullWidthDigits[i]);
+  }
+  const rowChars = ['一','二','三','四','五','六','七','八','九'];
+  const coordTop = document.getElementById('coord-top');
+  const coordLeft = document.getElementById('coord-left');
+  coordTop.innerHTML = '';
+  coordLeft.innerHTML = '';
+  for (let i = 0; i < BOARD_COLS; i++) {
+    const s1 = document.createElement('span'); s1.textContent = colNums[i]; coordTop.appendChild(s1);
+  }
+  for (let i = 0; i < BOARD_ROWS; i++) {
+    const s2 = document.createElement('span'); s2.textContent = rowChars[i]; coordLeft.appendChild(s2);
+  }
+}
+
+function renderHand(side) {
+  const hand = side === 'sente' ? senteHand : goteHand;
+  const el = document.getElementById(side + '-hand');
+  const title = el.querySelector('h3');
+  const timeInfo = el.querySelector('.time-info');
+  el.innerHTML = '';
+  el.appendChild(title);
+  const sideOwner = side === 'sente' ? SENTE : GOTE;
+  const sideType = side === 'sente' ? senteType : goteType;
+  const isInteractive = (turn === sideOwner && sideType === 'human' && !animating && !gameOver);
+
+  for (const pt of HAND_PIECES) {
+    const count = hand[pt] || 0;
+    if (count <= 0) continue;
+    const div = document.createElement('div');
+    div.className = 'hand-piece';
+    if (isInteractive && selectedHand === pt) {
+      div.classList.add('selected');
+    }
+    div.innerHTML = `${HAND_NAMES[pt]}<span class="count">×${count}</span>`;
+    if (isInteractive) {
+      div.addEventListener('click', () => onHandClick(pt, sideOwner));
+    }
+    el.appendChild(div);
+  }
+  if (timeInfo) el.appendChild(timeInfo);
+}
+
+function onHandClick(pieceType, owner) {
+  if (gameOver || animating || !isHumanTurn() || turn !== owner) return;
+  if (selectedHand === pieceType) {
+    selectedHand = null;
+  } else {
+    selected = null;
+    selectedHand = pieceType;
+  }
+  render();
+}
+
+function onCellClick(r, c) {
+  if (gameOver || animating || !isHumanTurn()) return;
+
+  const currentTurn = turn;
+  const myHand = currentTurn === SENTE ? senteHand : goteHand;
+
+  // If dropping from hand
+  if (selectedHand) {
+    const drops = getDropSquares(board, selectedHand, currentTurn);
+    const valid = drops.some(([dr, dc]) => dr === r && dc === c);
+    if (valid) {
+      // Commit human think time
+      stopHumanThinkTimer();
+      const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
+      commitThinkTime(currentTurn, elapsed);
+
+      pushHistory();
+      board[r][c] = currentTurn * selectedHand;
+      myHand[selectedHand] = (myHand[selectedHand] || 0) - 1;
+      if (myHand[selectedHand] <= 0) delete myHand[selectedHand];
+      lastMove = { tr: r, tc: c };
+      selectedHand = null;
+      selected = null;
+      turn = -currentTurn;
+      render();
+      checkAfterMove();
+      return;
+    }
+    selectedHand = null;
+    render();
+    return;
+  }
+
+  // If a piece is already selected, try to move
+  if (selected) {
+    const [sr, sc] = selected;
+    const piece = board[sr][sc];
+    const moves = getPieceMoves(piece, sr, sc, board);
+    const isValidTarget = moves.some(([mr, mc]) => mr === r && mc === c) && isLegalMove(board, sr, sc, r, c, currentTurn);
+
+    if (isValidTarget) {
+      const captured = board[r][c];
+      const canProm = shouldAskPromote(piece, sr, r) && canPromote(piece);
+      const mustProm = mustPromote(piece, r);
+
+      if (mustProm || (canProm && !mustProm)) {
+        if (mustProm) {
+          executeMove(sr, sc, r, c, true, captured);
+        } else {
+          showPromoteDialog(sr, sc, r, c, captured);
+          return;
+        }
+      } else {
+        executeMove(sr, sc, r, c, false, captured);
+      }
+      return;
+    }
+
+    // Clicked on own piece - reselect
+    if (getPieceOwner(board[r][c]) === currentTurn) {
+      selected = [r, c]; selectedHand = null; render(); return;
+    }
+    // Clicked elsewhere - deselect
+    selected = null; render(); return;
+  }
+
+  // Select own piece
+  if (getPieceOwner(board[r][c]) === currentTurn) {
+    selected = [r, c]; selectedHand = null; render();
+  }
+}
+
+function executeMove(fr, fc, tr, tc, promote, captured) {
+  const currentTurn = turn;
+  const myHand = currentTurn === SENTE ? senteHand : goteHand;
+
+  // Commit human think time
+  stopHumanThinkTimer();
+  const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
+  commitThinkTime(currentTurn, elapsed);
+
+  pushHistory();
+  board[tr][tc] = board[fr][fc];
+  board[fr][fc] = EMPTY;
+  if (promote) {
+    const a = absPiece(board[tr][tc]);
+    board[tr][tc] = currentTurn * PROMOTE_MAP[a];
+  }
+  if (captured !== EMPTY) {
+    const bt = baseType(captured);
+    if (bt !== WK) { // 若は手駒として使えない
+      myHand[bt] = (myHand[bt] || 0) + 1;
+    }
+  }
+  lastMove = { fr, fc, tr, tc };
+  selected = null; selectedHand = null;
+  turn = -currentTurn;
+  render();
+  checkAfterMove();
+}
+
+function showPromoteDialog(fr, fc, tr, tc, captured) {
+  const modal = document.getElementById('modal-overlay');
+  const text = document.getElementById('modal-text');
+  const buttons = document.getElementById('modal-buttons');
+  text.textContent = '成りますか？';
+  buttons.innerHTML = '';
+  const btnYes = document.createElement('button');
+  btnYes.textContent = '成る';
+  btnYes.onclick = () => { hideModal(); executeMove(fr, fc, tr, tc, true, captured); };
+  const btnNo = document.createElement('button');
+  btnNo.textContent = '不成';
+  btnNo.onclick = () => { hideModal(); executeMove(fr, fc, tr, tc, false, captured); };
+  buttons.appendChild(btnYes);
+  buttons.appendChild(btnNo);
+  modal.classList.add('show');
+}
+
+function hideModal() {
+  document.getElementById('modal-overlay').classList.remove('show');
+}
+
+function updateStatus(msg) {
+  if (msg) {
+    document.getElementById('status').textContent = msg;
+    return;
+  }
+  if (isCurrentAI()) {
+    document.getElementById('status').textContent = 'AIが考えています...';
+  } else {
+    const name = turnName(turn);
+    if (isInCheck(board, turn)) {
+      document.getElementById('status').textContent = '王手！ ' + name + 'の番です';
+    } else {
+      document.getElementById('status').textContent = name + 'の番です';
+    }
+  }
+}
+
+// Init
+resetGame();
+</script>
+</body>
+</html>
