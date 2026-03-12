@@ -336,7 +336,7 @@ function showPlayerSelectDialog() {
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
     ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
-    ouke: '<b>王家将棋</b> - 初期配置は王后将棋と同じ。<br>王と妃が隣接している時、1手を使って妃の前に「子」を作れます。<br>子は歩と同じ動き（前に1マス）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子は1体のみ存在可能（一人っ子ルール）。取られると新たに作れます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は王后将棋と同じ。<br>王と妃が隣接している時、1手を使って妃の前に「子」を作れます。<br>子は前に1マスまたは2マス移動可能（駒を飛び越えられます）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子は1体のみ存在可能（一人っ子ルール）。取られると新たに作れます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentDepth) {
@@ -660,8 +660,10 @@ function getPieceMoves(piece, r, c, boardState) {
     case RY:
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
       addMove(r-1,c-1); addMove(r-1,c+1); addMove(r+1,c-1); addMove(r+1,c+1); break;
-    case KO: // 子: 歩と同じ（前に1マス）
-      addMove(r+dir, c); break;
+    case KO: // 子: 前に1マスまたは2マス（飛び越え可）
+      addMove(r+dir, c);
+      { const r2 = r+dir*2; if (r2 >= 0 && r2 < BOARD_ROWS) addMove(r2, c); }
+      break;
     case WK: // 若（成子）: 角+飛車の動き（チェスのクイーン）
       addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
