@@ -9,6 +9,7 @@
 body { background: #2c1810; color: #fff; font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
 #app { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
+#move-count { font-size: 13px; color: #aaa; min-height: 18px; }
 #status { font-size: 18px; color: #ffcc00; min-height: 28px; }
 #game-area { display: flex; gap: 12px; align-items: stretch; }
 #center-column { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
@@ -64,6 +65,7 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 #modal .toggle-btn:hover:not(.active) { background: #4a3018; }
 #modal .toggle-btn.small { padding: 4px 12px; font-size: 12px; }
 .ai-level-row { margin-top: -8px; }
+.variant-desc { font-size: 12px; color: #c0a878; background: #3a2518; border: 1px solid #5a3a1a; border-radius: 6px; padding: 8px 12px; margin: 4px 0 8px; line-height: 1.6; }
 #modal .start-btn { margin-top: 18px; padding: 10px 40px; font-size: 17px; }
 .piece-char { position: relative; }
 @keyframes ai-piece-in {
@@ -90,6 +92,7 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 <body>
 <div id="app">
   <h1>将棋</h1>
+  <div id="move-count"></div>
   <div id="status">先手の番です</div>
   <div id="game-area">
     <div id="score-bar">
@@ -347,6 +350,12 @@ function showPlayerSelectDialog() {
   let selSenteDepth = senteAiDepth;
   let selGoteDepth = goteAiDepth;
 
+  const VARIANT_DESC = {
+    normal: '通常の将棋です。',
+    ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
+    ouke: '<b>王家将棋</b> - 新駒「妃」と「若」が登場。<br>妃は王と同じ動き。若は角+飛車の動き（チェスのクイーン）。<br>若は敵陣で成ると「王」になり、8方向1マスの動きに変わる代わりに、王が2枚になるため両方取らないと勝てません。<br>若を取っても持ち駒には使えません。<br>初期配置: 王の左に妃、8段目中央に若。'
+  };
+
   function aiLevelButtons(id, currentDepth) {
     return AI_LEVELS.map(l =>
       `<div class="toggle-btn small ${l.depth === currentDepth ? 'active' : ''}" data-val="${l.depth}">${l.label}</div>`
@@ -362,6 +371,7 @@ function showPlayerSelectDialog() {
         <div class="toggle-btn ${selVariant === 'ouke' ? 'active' : ''}" data-val="ouke">王家将棋</div>
       </div>
     </div>
+    <div id="variant-desc" class="variant-desc">${VARIANT_DESC[selVariant]}</div>
     <div class="select-row">
       <span>▲先手（下側）：</span>
       <div class="toggle-group" id="sente-toggle">
@@ -397,7 +407,10 @@ function showPlayerSelectDialog() {
       btn.classList.add('active');
     });
   }
-  setupToggle('variant-toggle', v => selVariant = v);
+  setupToggle('variant-toggle', v => {
+    selVariant = v;
+    document.getElementById('variant-desc').innerHTML = VARIANT_DESC[v];
+  });
   setupToggle('sente-toggle', v => {
     selSente = v;
     document.getElementById('sente-level-row').style.display = v === 'ai' ? 'flex' : 'none';
@@ -1191,7 +1204,7 @@ function renderHand(side) {
   el.innerHTML = '';
   const mark = side === 'sente' ? '▲' : '△';
   const sideName = side === 'sente' ? '先手' : '後手';
-  title.innerHTML = mark + sideName + '持駒 <span class="player-label">' + getPlayerLabel(side) + '</span>';
+  title.innerHTML = mark + sideName + ' <span class="player-label">' + getPlayerLabel(side) + '</span>';
   el.appendChild(title);
   const sideOwner = side === 'sente' ? SENTE : GOTE;
   const sideType = side === 'sente' ? senteType : goteType;
@@ -1347,7 +1360,16 @@ function hideModal() {
   document.getElementById('modal-overlay').classList.remove('show');
 }
 
+function updateMoveCount() {
+  const el = document.getElementById('move-count');
+  const moveNum = history.length;
+  if (moveNum === 0) { el.textContent = ''; return; }
+  const variantName = gameVariant === 'ougo' ? '王后将棋' : gameVariant === 'ouke' ? '王家将棋' : '将棋';
+  el.textContent = variantName + ' ' + moveNum + '手目';
+}
+
 function updateStatus(msg) {
+  updateMoveCount();
   if (msg) {
     document.getElementById('status').textContent = msg;
     return;
