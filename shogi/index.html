@@ -297,8 +297,8 @@ function initBoard() {
     board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
     board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
     if (gameVariant === 'ougo') {
-      board[7][4] = HM;  // 先手の妃
-      board[1][4] = -HM; // 後手の妃
+      board[8][3] = HM;   // 先手の妃（左金の位置）
+      board[0][5] = -HM;  // 後手の妃（ミラー配置）
     }
   }
 }
