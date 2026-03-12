@@ -61,6 +61,8 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 #modal .toggle-btn:last-child { border-radius: 0 6px 6px 0; }
 #modal .toggle-btn.active { background: #8b6914; color: #fff; }
 #modal .toggle-btn:hover:not(.active) { background: #4a3018; }
+#modal .toggle-btn.small { padding: 4px 12px; font-size: 12px; }
+.ai-level-row { margin-top: -8px; }
 #modal .start-btn { margin-top: 18px; padding: 10px 40px; font-size: 17px; }
 .piece-char { position: relative; }
 @keyframes ai-piece-in {
@@ -168,7 +170,15 @@ let senteType = 'human'; // 'human' | 'ai'
 let goteType = 'ai';     // 'human' | 'ai'
 let aiPaused = false;     // AI vs AI pause state
 let aiTimerId = null;     // setTimeout ID for pending AI move
-let gameVariant = 'normal'; // 'normal' | 'ougo' (王后将棋)
+let gameVariant = 'normal'; // 'normal' | 'ougo' | 'ouke'
+let senteAiDepth = 5;    // AI search depth for sente
+let goteAiDepth = 5;     // AI search depth for gote
+const AI_LEVELS = [
+  { label: '弱い', depth: 2 },
+  { label: '普通', depth: 3 },
+  { label: '強い', depth: 4 },
+  { label: '最強', depth: 5 }
+];
 
 // Timing state
 let senteThinkTotal = 0;  // cumulative ms
@@ -333,6 +343,14 @@ function showPlayerSelectDialog() {
   let selSente = senteType;
   let selGote = goteType;
   let selVariant = gameVariant;
+  let selSenteDepth = senteAiDepth;
+  let selGoteDepth = goteAiDepth;
+
+  function aiLevelButtons(id, currentDepth) {
+    return AI_LEVELS.map(l =>
+      `<div class="toggle-btn small ${l.depth === currentDepth ? 'active' : ''}" data-val="${l.depth}">${l.label}</div>`
+    ).join('');
+  }
 
   buttons.innerHTML = `
     <div class="select-row">
@@ -350,12 +368,20 @@ function showPlayerSelectDialog() {
         <div class="toggle-btn ${selSente === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
       </div>
     </div>
+    <div class="select-row ai-level-row" id="sente-level-row" style="display:${selSente === 'ai' ? 'flex' : 'none'}">
+      <span>　▲AIの強さ：</span>
+      <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteDepth)}</div>
+    </div>
     <div class="select-row">
       <span>△後手（上側）：</span>
       <div class="toggle-group" id="gote-toggle">
         <div class="toggle-btn ${selGote === 'human' ? 'active' : ''}" data-val="human">人間</div>
         <div class="toggle-btn ${selGote === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
       </div>
+    </div>
+    <div class="select-row ai-level-row" id="gote-level-row" style="display:${selGote === 'ai' ? 'flex' : 'none'}">
+      <span>　△AIの強さ：</span>
+      <div class="toggle-group" id="gote-level-toggle">${aiLevelButtons('gote-level', selGoteDepth)}</div>
     </div>
     <button class="start-btn" id="start-game-btn">対局開始</button>
   `;
@@ -371,13 +397,23 @@ function showPlayerSelectDialog() {
     });
   }
   setupToggle('variant-toggle', v => selVariant = v);
-  setupToggle('sente-toggle', v => selSente = v);
-  setupToggle('gote-toggle', v => selGote = v);
+  setupToggle('sente-toggle', v => {
+    selSente = v;
+    document.getElementById('sente-level-row').style.display = v === 'ai' ? 'flex' : 'none';
+  });
+  setupToggle('gote-toggle', v => {
+    selGote = v;
+    document.getElementById('gote-level-row').style.display = v === 'ai' ? 'flex' : 'none';
+  });
+  setupToggle('sente-level-toggle', v => selSenteDepth = parseInt(v));
+  setupToggle('gote-level-toggle', v => selGoteDepth = parseInt(v));
 
   buttons.querySelector('#start-game-btn').addEventListener('click', () => {
     senteType = selSente;
     goteType = selGote;
     gameVariant = selVariant;
+    senteAiDepth = selSenteDepth;
+    goteAiDepth = selGoteDepth;
     initBoard();
     render();
     hideModal();
@@ -942,7 +978,8 @@ function aiMove() {
 
   // Run AI in next tick to allow UI to update
   setTimeout(() => {
-    const result = minimax(board, senteHand, goteHand, 5, -Infinity, Infinity, maximizing, currentTurn);
+    const depth = currentTurn === SENTE ? senteAiDepth : goteAiDepth;
+    const result = minimax(board, senteHand, goteHand, depth, -Infinity, Infinity, maximizing, currentTurn);
     clearInterval(thinkTimer);
     const thinkMs = Date.now() - thinkStart;
     commitThinkTime(currentTurn, thinkMs);
