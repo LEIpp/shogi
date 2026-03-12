@@ -9,8 +9,7 @@
 body { background: #2c1810; color: #fff; font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
 #app { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
-#move-count { font-size: 13px; color: #aaa; min-height: 18px; }
-#status { font-size: 18px; color: #ffcc00; min-height: 28px; }
+#status { font-size: 16px; color: #ffcc00; min-height: 28px; }
 #game-area { display: flex; gap: 12px; align-items: stretch; }
 #center-column { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .hand-area { background: #3a2518; border: 2px solid #8b6914; border-radius: 8px; padding: 5px 10px; display: flex; align-items: center; gap: 5px; min-height: 38px; flex-wrap: wrap; }
@@ -34,10 +33,10 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 .cell.movable.capture::after { background: rgba(255,100,100,0.7); }
 .cell.check { box-shadow: inset 0 0 12px 4px rgba(255,0,0,0.6); }
 .cell.last-move { background: rgba(255,200,50,0.25); }
-.coord-top, .coord-bottom { display: grid; grid-template-columns: repeat(var(--board-cols, 9), var(--cell-size, 58px)); }
-.coord-left, .coord-right { display: flex; flex-direction: column; }
+.coord-top, .coord-bottom { display: grid; grid-template-columns: repeat(var(--board-cols, 9), var(--cell-size, 58px)); padding-left: 3px; }
+.coord-right { display: flex; flex-direction: column; }
 .coord-top span, .coord-bottom span { text-align: center; font-size: 13px; color: #e8d4a0; padding: 2px 0; }
-.coord-left span, .coord-right span { width: 20px; height: var(--cell-size, 58px); display: flex; align-items: center; justify-content: center; font-size: 13px; color: #e8d4a0; }
+.coord-right span { width: 20px; height: var(--cell-size, 58px); display: flex; align-items: center; justify-content: center; font-size: 13px; color: #e8d4a0; }
 #score-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 56px; align-self: stretch; }
 .score-label { font-size: 11px; color: #e8d4a0; white-space: nowrap; text-align: center; }
 .bar-container { flex: 1; width: 20px; background: #1a4a6a; border-radius: 10px; overflow: hidden; border: 1px solid #555; position: relative; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -91,8 +90,7 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 </head>
 <body>
 <div id="app">
-  <h1>将棋</h1>
-  <div id="move-count"></div>
+  <h1 id="game-title">将棋</h1>
   <div id="status">先手の番です</div>
   <div id="game-area">
     <div id="score-bar">
@@ -110,7 +108,6 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
       <div id="board-container">
         <div class="coord-top" id="coord-top"></div>
         <div style="display:flex">
-          <div class="coord-left" id="coord-left"></div>
           <div id="board"></div>
           <div class="coord-right" id="coord-right"></div>
         </div>
@@ -977,8 +974,9 @@ function aiMove() {
   else goteThinkCurrent = 0;
   const thinkMsg = () => {
     const checkStr = isInCheck(board, currentTurn) ? '王手！ ' : '';
-    if (isBothAI()) return checkStr + 'AI対局中（' + aiSide + '思考中）';
-    return checkStr + 'AIが考えています';
+    const mc = getMoveCountStr();
+    if (isBothAI()) return checkStr + 'AI対局中' + mc + '（' + aiSide + '思考中）';
+    return checkStr + 'AIが考えています' + mc;
   };
   updateStatus(thinkMsg() + '...');
   updateTimeDisplay();
@@ -1080,12 +1078,7 @@ function checkAfterMove() {
   } else {
     // Next turn is human
     startHumanThinkTimer();
-    const name = turnName(turn);
-    if (isInCheck(board, turn)) {
-      updateStatus('王手！ ' + name + 'の番です');
-    } else {
-      updateStatus(name + 'の番です');
-    }
+    updateStatus();
   }
   updateControls();
 }
@@ -1177,14 +1170,14 @@ function renderBoard() {
   }
   const rowChars = ['一','二','三','四','五','六','七','八','九'];
   const coordTop = document.getElementById('coord-top');
-  const coordLeft = document.getElementById('coord-left');
+  const coordRight = document.getElementById('coord-right');
   coordTop.innerHTML = '';
-  coordLeft.innerHTML = '';
+  coordRight.innerHTML = '';
   for (let i = 0; i < BOARD_COLS; i++) {
     const s1 = document.createElement('span'); s1.textContent = colNums[i]; coordTop.appendChild(s1);
   }
   for (let i = 0; i < BOARD_ROWS; i++) {
-    const s2 = document.createElement('span'); s2.textContent = rowChars[i]; coordLeft.appendChild(s2);
+    const s2 = document.createElement('span'); s2.textContent = rowChars[i]; coordRight.appendChild(s2);
   }
 }
 
@@ -1360,28 +1353,32 @@ function hideModal() {
   document.getElementById('modal-overlay').classList.remove('show');
 }
 
-function updateMoveCount() {
-  const el = document.getElementById('move-count');
+function getVariantName() {
+  return gameVariant === 'ougo' ? '王后将棋' : gameVariant === 'ouke' ? '王家将棋' : '将棋';
+}
+function updateTitle() {
+  document.getElementById('game-title').textContent = getVariantName();
+}
+function getMoveCountStr() {
   const moveNum = history.length;
-  if (moveNum === 0) { el.textContent = ''; return; }
-  const variantName = gameVariant === 'ougo' ? '王后将棋' : gameVariant === 'ouke' ? '王家将棋' : '将棋';
-  el.textContent = variantName + ' ' + moveNum + '手目';
+  return moveNum > 0 ? ' ' + moveNum + '手目' : '';
 }
 
 function updateStatus(msg) {
-  updateMoveCount();
+  updateTitle();
+  const mc = getMoveCountStr();
   if (msg) {
     document.getElementById('status').textContent = msg;
     return;
   }
   if (isCurrentAI()) {
-    document.getElementById('status').textContent = 'AIが考えています...';
+    document.getElementById('status').textContent = 'AIが考えています...' + mc;
   } else {
     const name = turnName(turn);
     if (isInCheck(board, turn)) {
-      document.getElementById('status').textContent = '王手！ ' + name + 'の番です';
+      document.getElementById('status').textContent = '王手！ ' + name + 'の番です' + mc;
     } else {
-      document.getElementById('status').textContent = name + 'の番です';
+      document.getElementById('status').textContent = name + 'の番です' + mc;
     }
   }
 }
