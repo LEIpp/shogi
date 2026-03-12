@@ -13,7 +13,8 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 #game-area { display: flex; gap: 12px; align-items: stretch; }
 #center-column { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .hand-area { background: #3a2518; border: 2px solid #8b6914; border-radius: 8px; padding: 5px 10px; display: flex; align-items: center; gap: 5px; min-height: 38px; flex-wrap: wrap; }
-.hand-area h3 { font-size: 13px; color: #e8d4a0; white-space: nowrap; margin-right: 2px; }
+.hand-area h3 { font-size: 13px; color: #e8d4a0; white-space: nowrap; margin-right: 2px; display: flex; align-items: center; gap: 6px; }
+.player-label { font-size: 11px; color: #aaa; font-weight: normal; }
 .hand-piece { display: flex; align-items: center; gap: 2px; padding: 3px 7px; cursor: pointer; border-radius: 4px; font-size: 15px; color: #1a0a00; background: #e8d4a0; white-space: nowrap; }
 .hand-piece:hover { background: #ffeabb; }
 .hand-piece.selected { background: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
@@ -967,6 +968,7 @@ function aiMove() {
     return checkStr + 'AIが考えています';
   };
   updateStatus(thinkMsg() + '...');
+  updateTimeDisplay();
   const thinkTimer = setInterval(() => {
     const elapsedMs = Date.now() - thinkStart;
     if (currentTurn === SENTE) senteThinkCurrent = elapsedMs;
@@ -974,14 +976,18 @@ function aiMove() {
     const dispSec = Math.floor(elapsedMs / 1000);
     updateStatus(thinkMsg() + `... (${dispSec}秒)`);
     updateTimeDisplay();
-  }, 200);
+  }, 100);
 
-  // Run AI in next tick to allow UI to update
+  // Delay to allow initial UI update before blocking minimax
   setTimeout(() => {
     const depth = currentTurn === SENTE ? senteAiDepth : goteAiDepth;
     const result = minimax(board, senteHand, goteHand, depth, -Infinity, Infinity, maximizing, currentTurn);
     clearInterval(thinkTimer);
     const thinkMs = Date.now() - thinkStart;
+    // Update display with final elapsed time before committing
+    if (currentTurn === SENTE) senteThinkCurrent = thinkMs;
+    else goteThinkCurrent = thinkMs;
+    updateTimeDisplay();
     commitThinkTime(currentTurn, thinkMs);
 
     if (!result.move) {
@@ -1169,12 +1175,23 @@ function renderBoard() {
   }
 }
 
+function getPlayerLabel(side) {
+  const type = side === 'sente' ? senteType : goteType;
+  if (type === 'human') return '人間';
+  const depth = side === 'sente' ? senteAiDepth : goteAiDepth;
+  const level = AI_LEVELS.find(l => l.depth === depth);
+  return 'AI(' + (level ? level.label : '深度' + depth) + ')';
+}
+
 function renderHand(side) {
   const hand = side === 'sente' ? senteHand : goteHand;
   const el = document.getElementById(side + '-hand');
   const title = el.querySelector('h3');
   const timeInfo = el.querySelector('.time-info');
   el.innerHTML = '';
+  const mark = side === 'sente' ? '▲' : '△';
+  const sideName = side === 'sente' ? '先手' : '後手';
+  title.innerHTML = mark + sideName + '持駒 <span class="player-label">' + getPlayerLabel(side) + '</span>';
   el.appendChild(title);
   const sideOwner = side === 'sente' ? SENTE : GOTE;
   const sideType = side === 'sente' ? senteType : goteType;
