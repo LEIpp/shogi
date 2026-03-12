@@ -138,24 +138,24 @@ const EMPTY = 0;
 const FU=1, KY=2, KE=3, GI=4, KI=5, KA=6, HI=7, OU=8;
 const TO=9, NY=10, NK=11, NG=12, UM=13, RY=14;
 const HM=15; // 妃（王后将棋・王家将棋用）
-const WK=16; // 若（王家将棋用、未成り: 角+飛車の動き）
-const NW=17; // 成若（王の動き、第2の王として機能）
+const KO=16; // 子（王家将棋用: 歩と同じ動き）
+const WK=17; // 若（成子: 角+飛車の動き）
 
 const PIECE_NAMES = {
   [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]:'角',[HI]:'飛',[OU]:'王',
   [TO]:'と',[NY]:'杏',[NK]:'圭',[NG]:'全',[UM]:'馬',[RY]:'龍',
-  [HM]:'妃',[WK]:'若',[NW]:'王'
+  [HM]:'妃',[KO]:'子',[WK]:'若'
 };
 
-const PROMOTE_MAP = { [FU]:TO, [KY]:NY, [KE]:NK, [GI]:NG, [KA]:UM, [HI]:RY, [WK]:NW };
-const UNPROMOTE_MAP = { [TO]:FU, [NY]:KY, [NK]:KE, [NG]:GI, [UM]:KA, [RY]:HI, [NW]:WK };
+const PROMOTE_MAP = { [FU]:TO, [KY]:NY, [KE]:NK, [GI]:NG, [KA]:UM, [HI]:RY, [KO]:WK };
+const UNPROMOTE_MAP = { [TO]:FU, [NY]:KY, [NK]:KE, [NG]:GI, [UM]:KA, [RY]:HI, [WK]:KO };
 const HAND_PIECES = [HI, KA, KI, GI, KE, KY, FU, HM];
 const HAND_NAMES = { [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]:'角',[HI]:'飛',[HM]:'妃' };
 
 const PIECE_VALUES = {
   [FU]:100,[KY]:300,[KE]:350,[GI]:450,[KI]:500,[KA]:650,[HI]:700,[OU]:10000,
   [TO]:420,[NY]:400,[NK]:410,[NG]:460,[UM]:850,[RY]:950,
-  [HM]:600,[WK]:800,[NW]:9500
+  [HM]:600,[KO]:150,[WK]:800
 };
 
 const SENTE = 1, GOTE = -1;
@@ -285,32 +285,18 @@ function initBoard() {
   BOARD_COLS = 9;
   board = Array.from({length: BOARD_ROWS}, () => Array(BOARD_COLS).fill(EMPTY));
 
-  if (gameVariant === 'ouke') {
-    // 王家将棋: 9×9盤面
-    // 後手1段目: 香 桂 銀 金 王 妃 銀 桂 香 (ミラー配置)
-    board[0][0]=-KY; board[0][1]=-KE; board[0][2]=-GI; board[0][3]=-KI;
-    board[0][4]=-OU; board[0][5]=-HM; board[0][6]=-GI; board[0][7]=-KE; board[0][8]=-KY;
-    board[1][1] = -HI; board[1][4] = -WK; board[1][7] = -KA;
-    for (let c = 0; c < BOARD_COLS; c++) board[2][c] = -FU;
-    // 先手: 香桂銀妃王金銀桂香 / 空角空空若空空飛空 / 歩×9
-    for (let c = 0; c < BOARD_COLS; c++) board[6][c] = FU;
-    board[7][1] = KA; board[7][4] = WK; board[7][7] = HI;
-    board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=HM;
-    board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
-  } else {
-    // 通常将棋・王后将棋: 9×9盤面
-    board[0][0]=-KY; board[0][1]=-KE; board[0][2]=-GI; board[0][3]=-KI;
-    board[0][4]=-OU; board[0][5]=-KI; board[0][6]=-GI; board[0][7]=-KE; board[0][8]=-KY;
-    board[1][1] = -HI; board[1][7] = -KA;
-    for (let c = 0; c < BOARD_COLS; c++) board[2][c] = -FU;
-    for (let c = 0; c < BOARD_COLS; c++) board[6][c] = FU;
-    board[7][1] = KA; board[7][7] = HI;
-    board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
-    board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
-    if (gameVariant === 'ougo') {
-      board[8][3] = HM;   // 先手の妃（左金の位置）
-      board[0][5] = -HM;  // 後手の妃（ミラー配置）
-    }
+  // 通常将棋: 標準9×9盤面
+  board[0][0]=-KY; board[0][1]=-KE; board[0][2]=-GI; board[0][3]=-KI;
+  board[0][4]=-OU; board[0][5]=-KI; board[0][6]=-GI; board[0][7]=-KE; board[0][8]=-KY;
+  board[1][1] = -HI; board[1][7] = -KA;
+  for (let c = 0; c < BOARD_COLS; c++) board[2][c] = -FU;
+  for (let c = 0; c < BOARD_COLS; c++) board[6][c] = FU;
+  board[7][1] = KA; board[7][7] = HI;
+  board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
+  board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
+  if (gameVariant === 'ougo' || gameVariant === 'ouke') {
+    board[8][3] = HM;   // 先手の妃（左金の位置）
+    board[0][5] = -HM;  // 後手の妃（ミラー配置）
   }
 }
 
@@ -350,7 +336,7 @@ function showPlayerSelectDialog() {
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
     ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
-    ouke: '<b>王家将棋</b> - 新駒「妃」と「若」が登場。<br>妃は王と同じ動き。若は角+飛車の動き（チェスのクイーン）。<br>若は敵陣で成ると「王」になり、8方向1マスの動きに変わる代わりに、王が2枚になるため両方取らないと勝てません。<br>若を取っても持ち駒には使えません。<br>初期配置: 王の左に妃、8段目中央に若。'
+    ouke: '<b>王家将棋</b> - 初期配置は王后将棋と同じ。<br>王と妃が隣接している時、1手を使って妃の前に「子」を作れます。<br>子は歩と同じ動き（前に1マス）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子は1体のみ存在可能（一人っ子ルール）。取られると新たに作れます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentDepth) {
@@ -674,11 +660,13 @@ function getPieceMoves(piece, r, c, boardState) {
     case RY:
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
       addMove(r-1,c-1); addMove(r-1,c+1); addMove(r+1,c-1); addMove(r+1,c+1); break;
-    case WK: // 若: 角+飛車の動き（チェスのクイーン）
+    case KO: // 子: 歩と同じ（前に1マス）
+      addMove(r+dir, c); break;
+    case WK: // 若（成子）: 角+飛車の動き（チェスのクイーン）
       addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
       break;
-    case OU: case HM: case NW: // 王・妃・成若: 8方向1マス
+    case OU: case HM: // 王・妃: 8方向1マス
       for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
         if (dr===0 && dc===0) continue;
         addMove(r+dr, c+dc);
@@ -688,32 +676,16 @@ function getPieceMoves(piece, r, c, boardState) {
   return moves;
 }
 
-function findAllKings(boardState, owner) {
-  const kings = [];
-  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
-    const a = absPiece(boardState[r][c]);
-    if (getPieceOwner(boardState[r][c]) === owner && (a === OU || a === NW)) {
-      kings.push([r, c]);
-    }
-  }
-  return kings;
-}
-
 function findKing(boardState, owner) {
-  // Returns first king found (OU or NW)
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
-    const a = absPiece(boardState[r][c]);
-    if (getPieceOwner(boardState[r][c]) === owner && (a === OU || a === NW)) return [r, c];
+    if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === OU) return [r, c];
   }
   return null;
 }
 
 function isInCheck(boardState, owner) {
-  const kings = findAllKings(boardState, owner);
-  if (kings.length === 0) return true; // 王がいない = 負け
-  if (kings.length >= 2) return false;  // 2枚以上 = チェック不可（片方取られてもOK）
-  // 1枚の場合: 従来通りのチェック判定
-  const king = kings[0];
+  const king = findKing(boardState, owner);
+  if (!king) return true;
   const opp = -owner;
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
     if (getPieceOwner(boardState[r][c]) === opp) {
@@ -747,10 +719,10 @@ function mustPromote(piece, tr) {
   const a = absPiece(piece);
   const owner = getPieceOwner(piece);
   if (owner === SENTE) {
-    if (a === FU || a === KY) return tr === 0;
+    if (a === FU || a === KY || a === KO) return tr === 0;
     if (a === KE) return tr <= 1;
   } else {
-    if (a === FU || a === KY) return tr === 8;
+    if (a === FU || a === KY || a === KO) return tr === 8;
     if (a === KE) return tr >= 7;
   }
   return false;
@@ -847,6 +819,11 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
       }
     }
   }
+  // 王家将棋: 子作成
+  const koInfo = canCreateKo(boardState, owner);
+  if (koInfo) {
+    moves.push({ type:'create_ko', tr: koInfo.targetR, tc: koInfo.targetC });
+  }
   return moves;
 }
 
@@ -866,10 +843,19 @@ function applyMove(boardState, move, sHand, gHand, owner) {
     }
     if (captured !== EMPTY) {
       const bt = baseType(captured);
-      if (bt !== WK) { // 若は手駒として使えない
+      if (bt !== KO && bt !== WK) { // 子・若は手駒として使えない
         myHand[bt] = (myHand[bt] || 0) + 1;
       }
     }
+  } else if (move.type === 'create_ko') {
+    const captured = nb[move.tr][move.tc];
+    if (captured !== EMPTY) {
+      const bt = baseType(captured);
+      if (bt !== KO && bt !== WK) {
+        myHand[bt] = (myHand[bt] || 0) + 1;
+      }
+    }
+    nb[move.tr][move.tc] = owner * KO;
   } else {
     nb[move.tr][move.tc] = owner * move.piece;
     myHand[move.piece] = (myHand[move.piece] || 0) - 1;
@@ -891,7 +877,7 @@ function evaluate(boardState, sHand, gHand) {
       if (owner === SENTE) val += (6 - r) * 2;
       else val += (r - 2) * 2;
     }
-    if (a === OU || a === NW) {
+    if (a === OU) {
       const centerDist = Math.abs(c - Math.floor(BOARD_COLS / 2));
       val += centerDist * 5;
     }
@@ -1152,7 +1138,7 @@ function renderBoard() {
         const isPromo = isPromoted(p);
         pieceEl.textContent = PIECE_NAMES[a];
         if (isPromo) pieceEl.style.color = '#cc0000';
-        if ((a === OU || a === NW) && getPieceOwner(p) === GOTE) {
+        if (a === OU && getPieceOwner(p) === GOTE) {
           pieceEl.textContent = '玉';
         }
         cell.appendChild(pieceEl);
@@ -1218,6 +1204,79 @@ function renderHand(side) {
     el.appendChild(div);
   }
   if (timeInfo) el.appendChild(timeInfo);
+}
+
+function canCreateKo(boardState, owner) {
+  if (gameVariant !== 'ouke') return null;
+  // 一人っ子ルール: 盤上にKOまたはWKが存在しないこと
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) === owner) {
+      const a = absPiece(boardState[r][c]);
+      if (a === KO || a === WK) return null;
+    }
+  }
+  // 妃の位置を探す
+  let himiR = -1, himiC = -1;
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === HM) {
+      himiR = r; himiC = c; break;
+    }
+    if (himiR >= 0) break;
+  }
+  if (himiR < 0) return null;
+  // 妃の前のセル
+  const dir = owner === SENTE ? -1 : 1;
+  const tr = himiR + dir, tc = himiC;
+  if (tr < 0 || tr >= BOARD_ROWS) return null;
+  // 前に味方の駒があればNG
+  if (getPieceOwner(boardState[tr][tc]) === owner) return null;
+  // 王との隣接チェック
+  const ouPos = findKing(boardState, owner);
+  if (!ouPos) return null;
+  if (Math.abs(himiR - ouPos[0]) > 1 || Math.abs(himiC - ouPos[1]) > 1) return null;
+  return { himiR, himiC, targetR: tr, targetC: tc, captured: boardState[tr][tc] };
+}
+
+function showCreateKoDialog(koInfo) {
+  const modal = document.getElementById('modal-overlay');
+  const text = document.getElementById('modal-text');
+  const buttons = document.getElementById('modal-buttons');
+  text.textContent = '子を作りますか？';
+  buttons.innerHTML = '';
+  const btnYes = document.createElement('button');
+  btnYes.textContent = '作る';
+  btnYes.onclick = () => { hideModal(); executeCreateKo(koInfo); };
+  const btnNo = document.createElement('button');
+  btnNo.textContent = '作らない';
+  btnNo.onclick = () => {
+    hideModal();
+    selected = [koInfo.himiR, koInfo.himiC]; selectedHand = null; render();
+  };
+  buttons.appendChild(btnYes);
+  buttons.appendChild(btnNo);
+  modal.classList.add('show');
+}
+
+function executeCreateKo(koInfo) {
+  const currentTurn = turn;
+  const myHand = currentTurn === SENTE ? senteHand : goteHand;
+  stopHumanThinkTimer();
+  const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
+  commitThinkTime(currentTurn, elapsed);
+  pushHistory();
+  const captured = koInfo.captured;
+  if (captured !== EMPTY) {
+    const bt = baseType(captured);
+    if (bt !== KO && bt !== WK) {
+      myHand[bt] = (myHand[bt] || 0) + 1;
+    }
+  }
+  board[koInfo.targetR][koInfo.targetC] = currentTurn * KO;
+  lastMove = { tr: koInfo.targetR, tc: koInfo.targetC };
+  selected = null; selectedHand = null;
+  turn = -currentTurn;
+  render();
+  checkAfterMove();
 }
 
 function onHandClick(pieceType, owner) {
@@ -1299,6 +1358,14 @@ function onCellClick(r, c) {
 
   // Select own piece
   if (getPieceOwner(board[r][c]) === currentTurn) {
+    // 王家将棋: 妃クリック時に子作成ダイアログ
+    if (absPiece(board[r][c]) === HM && gameVariant === 'ouke') {
+      const koInfo = canCreateKo(board, currentTurn);
+      if (koInfo && koInfo.himiR === r && koInfo.himiC === c) {
+        showCreateKoDialog(koInfo);
+        return;
+      }
+    }
     selected = [r, c]; selectedHand = null; render();
   }
 }
