@@ -187,7 +187,7 @@ pub fn iterative_deepening(
     maximizing: bool,
     time_limit_ms: u32,
     variant: GameVariant,
-) -> (i32, Option<ShogiMove>) {
+) -> (i32, Option<ShogiMove>, u8) {
     state.tt.generation = state.tt.generation.wrapping_add(1);
     state.nodes = 0;
     state.time_limit = time_limit_ms as f64;
@@ -195,16 +195,18 @@ pub fn iterative_deepening(
     state.aborted = false;
 
     let mut best_result: (i32, Option<ShogiMove>) = (0, None);
+    let mut completed_depth: u8 = 0;
 
     for d in 1..=max_depth {
         let result = minimax(state, board, s_hand, g_hand, d, i32::MIN + 1, i32::MAX - 1, maximizing, d, variant);
         if state.aborted { break; }
         if result.1.is_some() { best_result = result; }
+        completed_depth = d;
         // Early exit on forced mate
         if result.0.unsigned_abs() > 90000 { break; }
         // Time check before next depth
         if state.time_limit > 0.0 && (js_sys::Date::now() - state.start_time) >= state.time_limit { break; }
     }
 
-    best_result
+    (best_result.0, best_result.1, completed_depth)
 }

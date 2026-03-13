@@ -241,6 +241,65 @@ function aggregateMctsStats(allStats) {
   };
 }
 
+// Run parallel minimax (Lazy SMP) across workers
+function runMinimaxParallel(flatBoard, sHand, gHand, maxDepth, maximizing, timeLimitMs, variantCode) {
+  return new Promise((resolve) => {
+    const numWorkers = mctsWorkerPool.length;
+    const results = [];
+    let completed = 0;
+
+    mctsWorkerPool.forEach((worker, i) => {
+      // Lazy SMP depth diversification: odd workers search one depth deeper
+      const workerDepth = (i % 2 === 1 && maxDepth < 255) ? maxDepth + 1 : maxDepth;
+
+      const handler = function(e) {
+        if (e.data.type !== 'minimax') return;
+        worker.removeEventListener('message', handler);
+        results.push(e.data.result);
+        completed++;
+        if (completed === numWorkers) {
+          resolve(aggregateMinimaxResults(results));
+        }
+      };
+      worker.addEventListener('message', handler);
+      worker.postMessage({
+        type: 'minimax', workerId: i,
+        board: Array.from(flatBoard), sHand: Array.from(sHand), gHand: Array.from(gHand),
+        maxDepth: workerDepth, maximizing, timeLimit: timeLimitMs, variant: variantCode
+      });
+    });
+  });
+}
+
+// Pick the result from the worker that completed the deepest search
+function aggregateMinimaxResults(results) {
+  let best = null;
+  for (const r of results) {
+    if (!r || !r.found) continue;
+    if (!best || r.completedDepth > best.completedDepth ||
+        (r.completedDepth === best.completedDepth && r.score > best.score)) {
+      best = r;
+    }
+  }
+  if (!best) {
+    // All results were not found - return first one
+    return results[0] || { found: false, score: 0 };
+  }
+  // Convert to the same format as other AI results
+  const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
+  return {
+    found: true,
+    score: best.score,
+    move: {
+      type: moveTypes[best.type] || 'move',
+      fr: best.fr, fc: best.fc,
+      tr: best.tr, tc: best.tc,
+      promote: best.promote,
+      piece: best.piece
+    }
+  };
+}
+
 // WASM helper: convert board[9][9] to flat Int8Array(81)
 function boardToFlat(b) {
   const flat = new Int8Array(81);
@@ -1333,20 +1392,20 @@ function aiMove() {
     const level = AI_LEVELS[levelIdx];
     let result;
 
+    const flatBoard = boardToFlat(board);
+    const sHand = handToArray(senteHand);
+    const gHand = handToArray(goteHand);
+    const variantCode = gameVariant === 'ouke' ? 1 : 0;
+
     if (algo === 'mcts' && mctsWorkersReady) {
       // Parallel MCTS via Web Workers
-      const flatBoard = boardToFlat(board);
-      const sHand = handToArray(senteHand);
-      const gHand = handToArray(goteHand);
-      const variantCode = gameVariant === 'ouke' ? 1 : 0;
       const mctsLvIdx = currentTurn === SENTE ? senteMctsLevel : goteMctsLevel;
       const mctsLv = MCTS_LEVELS[mctsLvIdx];
       result = await runMctsParallel(flatBoard, sHand, gHand, mctsLv.simulations, maximizing, mctsLv.timeLimit, variantCode);
+    } else if (algo === 'minimax' && mctsWorkersReady && mctsWorkerPool.length > 1) {
+      // Parallel minimax (Lazy SMP) via Web Workers
+      result = await runMinimaxParallel(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit || 0, variantCode);
     } else if (wasmEngine) {
-      const flatBoard = boardToFlat(board);
-      const sHand = handToArray(senteHand);
-      const gHand = handToArray(goteHand);
-      const variantCode = gameVariant === 'ouke' ? 1 : 0;
       if (algo === 'mcts') {
         // Single-threaded MCTS fallback (no workers)
         const mctsLvIdx = currentTurn === SENTE ? senteMctsLevel : goteMctsLevel;
@@ -1359,7 +1418,7 @@ function aiMove() {
           result = { score: wasmResult.score, move: null };
         }
       } else {
-        // Minimax engine
+        // Single-threaded minimax engine
         const wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
         if (wasmResult.found) {
           const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
@@ -1768,7 +1827,10 @@ function getPlayerLabel(side) {
   }
   const levelIdx = side === 'sente' ? senteAiLevel : goteAiLevel;
   const level = AI_LEVELS[levelIdx];
-  return 'AI(' + (level ? level.label : '不明') + ')';
+  const cores = mctsWorkersReady && mctsWorkerPool.length > 1
+    ? ' ×' + mctsWorkerPool.length
+    : '';
+  return 'AI(' + (level ? level.label : '不明') + cores + ')';
 }
 
 function renderHand(side) {

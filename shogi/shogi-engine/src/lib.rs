@@ -62,13 +62,14 @@ pub fn wasm_search(
         g_hand[i] = gote_hand[i];
     }
 
-    let (score, best_move) = iterative_deepening(
+    let (score, best_move, completed_depth) = iterative_deepening(
         state, &board, &s_hand, &g_hand,
         max_depth, maximizing, time_limit_ms, variant,
     );
 
     // Build result JS object
     let obj = js_sys::Object::new();
+    js_sys::Reflect::set(&obj, &"completedDepth".into(), &(completed_depth as i32).into()).unwrap();
     match best_move {
         Some(m) => {
             js_sys::Reflect::set(&obj, &"found".into(), &true.into()).unwrap();
