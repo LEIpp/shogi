@@ -173,8 +173,8 @@ let goteType = 'ai';     // 'human' | 'ai'
 let aiPaused = false;     // AI vs AI pause state
 let aiTimerId = null;     // setTimeout ID for pending AI move
 let gameVariant = 'normal'; // 'normal' | 'ougo' | 'ouke'
-// 王家将棋: 妊娠カウンター（各陣営の残りターン数。-1=妊娠なし、0=出産ターン、1-8=待機中）
-let ninPregnancy = { [SENTE]: -1, [GOTE]: -1 };
+// 王家将棋: 妊娠カウンター（座標ベース。キー="r,c"、値=残りターン数。0=出産ターン、1-8=待機中）
+let ninPregnancy = {};
 let senteAiDepth = 5;    // AI search depth for sente
 let goteAiDepth = 5;     // AI search depth for gote
 const AI_LEVELS = [
@@ -316,7 +316,7 @@ function resetGame() {
   aiPaused = false;
   history = [];
   undoneHistory = [];
-  ninPregnancy = { [SENTE]: -1, [GOTE]: -1 };
+  ninPregnancy = {};
   ttClear();
   senteThinkTotal = 0; goteThinkTotal = 0;
   senteThinkCurrent = 0; goteThinkCurrent = 0;
@@ -442,7 +442,7 @@ function pushHistory() {
     senteHand: {...senteHand},
     goteHand: {...goteHand},
     turn, lastMove, gameOver,
-    ninPregnancy: { ...ninPregnancy }
+    ninPregnancy: Object.assign({}, ninPregnancy)
   });
   // Clear forward history when a new move is made
   undoneHistory = [];
@@ -451,7 +451,7 @@ function pushHistory() {
 function restoreState(state) {
   board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
   turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
-  if (state.ninPregnancy) ninPregnancy = { ...state.ninPregnancy };
+  if (state.ninPregnancy) ninPregnancy = Object.assign({}, state.ninPregnancy);
 }
 
 function captureCurrentState() {
@@ -460,7 +460,7 @@ function captureCurrentState() {
     senteHand: {...senteHand},
     goteHand: {...goteHand},
     turn, lastMove, gameOver,
-    ninPregnancy: { ...ninPregnancy }
+    ninPregnancy: Object.assign({}, ninPregnancy)
   };
 }
 
@@ -1125,12 +1125,10 @@ function aiMove() {
     // 王家将棋: AIの特殊手処理
     if (gameVariant === 'ouke') {
       if (move.type === 'promote_nin') {
-        ninPregnancy[currentTurn] = 8;
+        ninPregnancy[move.tr + ',' + move.tc] = 8;
       }
-      // 相手の妊が取られたかチェック
-      if (ninPregnancy[-currentTurn] >= 0 && !findNin(board, -currentTurn)) {
-        ninPregnancy[-currentTurn] = -1;
-      }
+      // 取られた妊のカウンターをクリア
+      clearCapturedNinPregnancy();
     }
 
     turn = -currentTurn;
@@ -1155,7 +1153,7 @@ function aiMove() {
   }, 50);
 }
 
-// 王家将棋: 妊の位置を探す
+// 王家将棋: 妊の位置を探す（最初に見つかった1体）
 function findNin(boardState, owner) {
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
     if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === NIN) {
@@ -1165,18 +1163,36 @@ function findNin(boardState, owner) {
   return null;
 }
 
+// 王家将棋: 盤上に存在しない妊の妊娠カウンターをクリア
+function clearCapturedNinPregnancy() {
+  for (const key of Object.keys(ninPregnancy)) {
+    const [r, c] = key.split(',').map(Number);
+    if (absPiece(board[r][c]) !== NIN) {
+      delete ninPregnancy[key];
+    }
+  }
+}
+
+// 王家将棋: 指定プレイヤーの出産予定の妊を探す（カウンター==0）
+function findBirthReadyNin(player) {
+  for (const key of Object.keys(ninPregnancy)) {
+    if (ninPregnancy[key] !== 0) continue;
+    const [r, c] = key.split(',').map(Number);
+    if (getPieceOwner(board[r][c]) === player && absPiece(board[r][c]) === NIN) {
+      return [r, c, key];
+    }
+  }
+  return null;
+}
+
 // 王家将棋: 自動出産処理（ターン開始時に呼ばれる）
 function processAutoBirth(player) {
   if (gameVariant !== 'ouke') return false;
-  if (ninPregnancy[player] !== 0) return false;
 
-  const ninPos = findNin(board, player);
-  if (!ninPos) {
-    ninPregnancy[player] = -1;
-    return false;
-  }
+  const birthInfo = findBirthReadyNin(player);
+  if (!birthInfo) return false;
 
-  const [ninR, ninC] = ninPos;
+  const [ninR, ninC, ninKey] = birthInfo;
   const dir = player === SENTE ? -1 : 1;
   const targetR = ninR + dir;
   const targetC = ninC;
@@ -1187,13 +1203,13 @@ function processAutoBirth(player) {
   if (targetR < 0 || targetR >= BOARD_ROWS) {
     // 盤外 → 死産（妃→金に戻る）
     board[ninR][ninC] = player * KI;
-    ninPregnancy[player] = -1;
+    delete ninPregnancy[ninKey];
     lastMove = { tr: ninR, tc: ninC };
     updateStatus(turnName(player) + 'の妊が出産...盤外のため死産。金に戻りました。');
   } else if (getPieceOwner(board[targetR][targetC]) === player) {
     // 前に味方の駒 → 死産（妃→金に戻る）
     board[ninR][ninC] = player * KI;
-    ninPregnancy[player] = -1;
+    delete ninPregnancy[ninKey];
     lastMove = { tr: ninR, tc: ninC };
     updateStatus(turnName(player) + 'の妊が出産...味方駒が邪魔で死産。金に戻りました。');
   } else {
@@ -1204,7 +1220,7 @@ function processAutoBirth(player) {
     }
     board[ninR][ninC] = player * HM; // 妊→妃
     board[targetR][targetC] = player * KO; // 子を配置
-    ninPregnancy[player] = -1;
+    delete ninPregnancy[ninKey];
     lastMove = { tr: targetR, tc: targetC };
     if (captured !== EMPTY) {
       updateStatus(turnName(player) + 'の妊が出産！敵駒を取って子が生まれ、妃になりました。');
@@ -1223,14 +1239,16 @@ function processAutoBirth(player) {
 // 王家将棋: 妊娠カウンターを進める（ターン開始時）
 function advancePregnancy(player) {
   if (gameVariant !== 'ouke') return;
-  if (ninPregnancy[player] > 0) {
-    // 妊がまだ盤上に存在するか確認
-    const ninPos = findNin(board, player);
-    if (!ninPos) {
-      ninPregnancy[player] = -1; // 妊が取られた
-      return;
+  for (const key of Object.keys(ninPregnancy)) {
+    if (ninPregnancy[key] <= 0) continue;
+    const [r, c] = key.split(',').map(Number);
+    // このプレイヤーの妊か確認
+    if (getPieceOwner(board[r][c]) !== player) continue;
+    if (absPiece(board[r][c]) !== NIN) {
+      delete ninPregnancy[key]; // 妊が取られた
+      continue;
     }
-    ninPregnancy[player]--;
+    ninPregnancy[key]--;
   }
 }
 
@@ -1240,8 +1258,8 @@ function checkAfterMove() {
 
   // 王家将棋: 妊娠カウンター処理
   if (gameVariant === 'ouke') {
-    // 自動出産チェック（カウンター==0なら出産実行）
-    if (ninPregnancy[nextPlayer] === 0) {
+    // 自動出産チェック（カウンター==0の妊があれば出産実行）
+    if (findBirthReadyNin(nextPlayer)) {
       // 少し遅延して出産アニメーション
       const birthDelay = isCurrentAI() ? 500 : 200;
       setTimeout(() => {
@@ -1365,8 +1383,8 @@ function renderBoard() {
         }
         // 王家将棋: 妊にあと何手で出産かカウンター表示
         if (a === NIN && gameVariant === 'ouke') {
-          const ninOwner = getPieceOwner(p);
-          const rem = ninPregnancy[ninOwner];
+          const ninKey = r + ',' + c;
+          const rem = ninPregnancy[ninKey] !== undefined ? ninPregnancy[ninKey] : -1;
           if (rem > 0) {
             const counter = document.createElement('span');
             counter.style.cssText = 'font-size:14px;position:absolute;bottom:-2px;right:0;color:#ff4400;font-weight:bold;text-shadow:0 0 3px #000,0 0 3px #000;line-height:1;';
@@ -1492,7 +1510,7 @@ function executePromoteToNin(r, c) {
   commitThinkTime(currentTurn, elapsed);
   pushHistory();
   board[r][c] = currentTurn * NIN;
-  ninPregnancy[currentTurn] = 8; // 8手後に出産
+  ninPregnancy[r + ',' + c] = 8; // 8手後に出産
   lastMove = { tr: r, tc: c };
   selected = null; selectedHand = null;
   turn = -currentTurn;
@@ -1615,8 +1633,7 @@ function executeMove(fr, fc, tr, tc, promote, captured) {
   addCaptureToHand(captured, myHand);
   // 王家将棋: 妊が取られたら妊娠カウンターをクリア
   if (captured !== EMPTY && gameVariant === 'ouke' && absPiece(captured) === NIN) {
-    const capturedOwner = getPieceOwner(captured);
-    ninPregnancy[capturedOwner] = -1;
+    delete ninPregnancy[tr + ',' + tc];
   }
   lastMove = { fr, fc, tr, tc };
   selected = null; selectedHand = null;
