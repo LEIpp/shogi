@@ -156,7 +156,7 @@ const HAND_NAMES = { [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]
 const PIECE_VALUES = {
   [FU]:100,[KY]:300,[KE]:350,[GI]:450,[KI]:500,[KA]:650,[HI]:700,[OU]:10000,
   [TO]:420,[NY]:400,[NK]:410,[NG]:460,[UM]:850,[RY]:950,
-  [HM]:600,[KO]:150,[WK]:800,[NIN]:550
+  [HM]:600,[KO]:500,[WK]:800,[NIN]:550
 };
 
 const SENTE = 1, GOTE = -1;
@@ -341,7 +341,7 @@ function showPlayerSelectDialog() {
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
     ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は前に1マスまたは2マス移動可能（飛び越え可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentDepth) {
@@ -658,9 +658,18 @@ function getPieceMoves(piece, r, c, boardState) {
     case RY:
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
       addMove(r-1,c-1); addMove(r-1,c+1); addMove(r+1,c-1); addMove(r+1,c+1); break;
-    case KO: // 子: 前に1マスまたは2マス（飛び越え可）
-      addMove(r+dir, c);
-      { const r2 = r+dir*2; if (r2 >= 0 && r2 < BOARD_ROWS) addMove(r2, c); }
+    case KO: // 子: 8方向に最大3マス（飛び越え不可）
+      for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
+        if (dr===0 && dc===0) continue;
+        for (let step=1; step<=3; step++) {
+          const nr = r+dr*step, nc = c+dc*step;
+          if (nr < 0 || nr >= BOARD_ROWS || nc < 0 || nc >= BOARD_COLS) break;
+          const target = boardState[nr][nc];
+          if (getPieceOwner(target) === owner) break;
+          moves.push([nr, nc]);
+          if (target !== EMPTY) break;
+        }
+      }
       break;
     case WK: // 若（成子）: 角+飛車の動き（チェスのクイーン）
       addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
@@ -722,10 +731,10 @@ function mustPromote(piece, tr) {
   const a = absPiece(piece);
   const owner = getPieceOwner(piece);
   if (owner === SENTE) {
-    if (a === FU || a === KY || a === KO) return tr === 0;
+    if (a === FU || a === KY) return tr === 0;
     if (a === KE) return tr <= 1;
   } else {
-    if (a === FU || a === KY || a === KO) return tr === 8;
+    if (a === FU || a === KY) return tr === 8;
     if (a === KE) return tr >= 7;
   }
   return false;
