@@ -91,6 +91,54 @@ pub fn wasm_search(
 }
 
 #[wasm_bindgen]
+pub fn wasm_mcts_search_stats(
+    board_flat: &[i8],
+    sente_hand: &[u8],
+    gote_hand: &[u8],
+    simulations: u32,
+    maximizing: bool,
+    time_limit_ms: u32,
+    game_variant: u8,
+) -> JsValue {
+    let variant = GameVariant::from_u8(game_variant);
+
+    let mut board: Board = [0i8; BOARD_SIZE];
+    for i in 0..BOARD_SIZE.min(board_flat.len()) {
+        board[i] = board_flat[i];
+    }
+    let mut s_hand: Hand = [0u8; 8];
+    let mut g_hand: Hand = [0u8; 8];
+    for i in 0..8.min(sente_hand.len()) {
+        s_hand[i] = sente_hand[i];
+    }
+    for i in 0..8.min(gote_hand.len()) {
+        g_hand[i] = gote_hand[i];
+    }
+
+    let stats = mcts::mcts_search_root_stats(
+        &board, &s_hand, &g_hand,
+        simulations, maximizing, time_limit_ms, variant,
+    );
+
+    let arr = js_sys::Array::new();
+    for s in &stats {
+        let obj = js_sys::Object::new();
+        js_sys::Reflect::set(&obj, &"type".into(), &(s.m.move_type as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"fr".into(), &(s.m.fr as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"fc".into(), &(s.m.fc as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"tr".into(), &(s.m.tr as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"tc".into(), &(s.m.tc as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"promote".into(), &s.m.promote.into()).unwrap();
+        js_sys::Reflect::set(&obj, &"piece".into(), &(s.m.piece as i32).into()).unwrap();
+        js_sys::Reflect::set(&obj, &"visits".into(), &s.visits.into()).unwrap();
+        js_sys::Reflect::set(&obj, &"value".into(), &s.total_value.into()).unwrap();
+        arr.push(&obj);
+    }
+
+    arr.into()
+}
+
+#[wasm_bindgen]
 pub fn wasm_mcts_search(
     board_flat: &[i8],
     sente_hand: &[u8],

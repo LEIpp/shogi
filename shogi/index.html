@@ -151,6 +151,92 @@ async function loadWasmEngine() {
 }
 loadWasmEngine();
 
+// MCTS Web Worker pool for parallel search
+let mctsWorkerPool = [];
+let mctsWorkersReady = false;
+function initMctsWorkers() {
+  const numWorkers = Math.min(navigator.hardwareConcurrency || 1, 8);
+  try {
+    for (let i = 0; i < numWorkers; i++) {
+      const worker = new Worker('./shogi-worker.js', { type: 'module' });
+      mctsWorkerPool.push(worker);
+    }
+    mctsWorkersReady = numWorkers > 0;
+    console.log(`MCTS worker pool: ${numWorkers} workers`);
+  } catch(e) {
+    console.warn('Web Worker init failed, MCTS will run single-threaded:', e);
+  }
+}
+initMctsWorkers();
+
+// Run parallel MCTS across workers, aggregate root-child visit counts
+let mctsRequestCounter = 0;
+function runMctsParallel(flatBoard, sHand, gHand, simulations, maximizing, timeLimit, variantCode) {
+  return new Promise((resolve) => {
+    const numWorkers = mctsWorkerPool.length;
+    const simsPerWorker = Math.ceil(simulations / numWorkers);
+    const requestId = ++mctsRequestCounter;
+    const allStats = [];
+    let completed = 0;
+
+    for (let i = 0; i < numWorkers; i++) {
+      const worker = mctsWorkerPool[i];
+      const handler = function(e) {
+        if (e.data.requestId !== requestId) return;
+        worker.removeEventListener('message', handler);
+        allStats.push(e.data.stats);
+        completed++;
+        if (completed === numWorkers) {
+          resolve(aggregateMctsStats(allStats));
+        }
+      };
+      worker.addEventListener('message', handler);
+      worker.postMessage({
+        board: Array.from(flatBoard),
+        sHand: Array.from(sHand),
+        gHand: Array.from(gHand),
+        simulations: simsPerWorker,
+        maximizing, timeLimit, variantCode, requestId
+      });
+    }
+  });
+}
+
+// Aggregate per-move visit counts from multiple workers
+function aggregateMctsStats(allStats) {
+  const merged = new Map();
+  for (const workerStats of allStats) {
+    for (const s of workerStats) {
+      const key = `${s.type},${s.fr},${s.fc},${s.tr},${s.tc},${s.promote?1:0},${s.piece}`;
+      if (merged.has(key)) {
+        const e = merged.get(key);
+        e.visits += s.visits;
+        e.value += s.value;
+      } else {
+        merged.set(key, { ...s });
+      }
+    }
+  }
+  // Pick move with most total visits
+  let best = null;
+  for (const stat of merged.values()) {
+    if (!best || stat.visits > best.visits) best = stat;
+  }
+  if (!best) return { found: false, score: 0 };
+  const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
+  return {
+    found: true,
+    score: 0,
+    move: {
+      type: moveTypes[best.type] || 'move',
+      fr: best.fr, fc: best.fc,
+      tr: best.tr, tc: best.tc,
+      promote: best.promote,
+      piece: best.piece
+    }
+  };
+}
+
 // WASM helper: convert board[9][9] to flat Int8Array(81)
 function boardToFlat(b) {
   const flat = new Int8Array(81);
@@ -1229,41 +1315,47 @@ function aiMove() {
     updateTimeDisplay();
   }, 100);
 
-  // Delay to allow initial UI update before blocking minimax
-  setTimeout(() => {
+  // Delay to allow initial UI update before search
+  setTimeout(async () => {
     const algo = currentTurn === SENTE ? senteAlgorithm : goteAlgorithm;
     const levelIdx = currentTurn === SENTE ? senteAiLevel : goteAiLevel;
     const level = AI_LEVELS[levelIdx];
     let result;
-    if (wasmEngine) {
+
+    if (algo === 'mcts' && mctsWorkersReady) {
+      // Parallel MCTS via Web Workers
       const flatBoard = boardToFlat(board);
       const sHand = handToArray(senteHand);
       const gHand = handToArray(goteHand);
       const variantCode = gameVariant === 'ouke' ? 1 : 0;
-      let wasmResult;
+      const mctsLvIdx = currentTurn === SENTE ? senteMctsLevel : goteMctsLevel;
+      const mctsLv = MCTS_LEVELS[mctsLvIdx];
+      result = await runMctsParallel(flatBoard, sHand, gHand, mctsLv.simulations, maximizing, mctsLv.timeLimit, variantCode);
+    } else if (wasmEngine) {
+      const flatBoard = boardToFlat(board);
+      const sHand = handToArray(senteHand);
+      const gHand = handToArray(goteHand);
+      const variantCode = gameVariant === 'ouke' ? 1 : 0;
       if (algo === 'mcts') {
-        // MCTS engine
+        // Single-threaded MCTS fallback (no workers)
         const mctsLvIdx = currentTurn === SENTE ? senteMctsLevel : goteMctsLevel;
         const mctsLv = MCTS_LEVELS[mctsLvIdx];
-        wasmResult = wasmEngine.wasm_mcts_search(flatBoard, sHand, gHand, mctsLv.simulations, maximizing, mctsLv.timeLimit, variantCode);
+        const wasmResult = wasmEngine.wasm_mcts_search(flatBoard, sHand, gHand, mctsLv.simulations, maximizing, mctsLv.timeLimit, variantCode);
+        if (wasmResult.found) {
+          const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
+          result = { score: wasmResult.score, move: { type: moveTypes[wasmResult.type] || 'move', fr: wasmResult.fr, fc: wasmResult.fc, tr: wasmResult.tr, tc: wasmResult.tc, promote: wasmResult.promote, piece: wasmResult.piece } };
+        } else {
+          result = { score: wasmResult.score, move: null };
+        }
       } else {
         // Minimax engine
-        wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
-      }
-      if (wasmResult.found) {
-        const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
-        result = {
-          score: wasmResult.score,
-          move: {
-            type: moveTypes[wasmResult.type] || 'move',
-            fr: wasmResult.fr, fc: wasmResult.fc,
-            tr: wasmResult.tr, tc: wasmResult.tc,
-            promote: wasmResult.promote,
-            piece: wasmResult.piece
-          }
-        };
-      } else {
-        result = { score: wasmResult.score, move: null };
+        const wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
+        if (wasmResult.found) {
+          const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
+          result = { score: wasmResult.score, move: { type: moveTypes[wasmResult.type] || 'move', fr: wasmResult.fr, fc: wasmResult.fc, tr: wasmResult.tr, tc: wasmResult.tc, promote: wasmResult.promote, piece: wasmResult.piece } };
+        } else {
+          result = { score: wasmResult.score, move: null };
+        }
       }
     } else {
       // Fallback to JS engine (minimax only)
@@ -1658,7 +1750,8 @@ function getPlayerLabel(side) {
   if (algo === 'mcts') {
     const mctsIdx = side === 'sente' ? senteMctsLevel : goteMctsLevel;
     const lv = MCTS_LEVELS[mctsIdx];
-    return 'MCTS(' + (lv ? lv.label : '不明') + ')';
+    const cores = mctsWorkerPool.length > 1 ? ' ×' + mctsWorkerPool.length : '';
+    return 'MCTS(' + (lv ? lv.label : '不明') + cores + ')';
   }
   const levelIdx = side === 'sente' ? senteAiLevel : goteAiLevel;
   const level = AI_LEVELS[levelIdx];
