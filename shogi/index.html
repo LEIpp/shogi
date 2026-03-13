@@ -1552,10 +1552,10 @@ function showAbortDialog(r, c) {
   const modal = document.getElementById('modal-overlay');
   const text = document.getElementById('modal-text');
   const buttons = document.getElementById('modal-buttons');
-  text.textContent = '中絶しますか？（妊→金に戻る、1手消費）';
+  text.textContent = '金に戻しますか？（1手消費）';
   buttons.innerHTML = '';
   const btnYes = document.createElement('button');
-  btnYes.textContent = '中絶する';
+  btnYes.textContent = '戻す';
   btnYes.onclick = () => { hideModal(); executeAbort(r, c); };
   const btnNo = document.createElement('button');
   btnNo.textContent = 'やめる';
