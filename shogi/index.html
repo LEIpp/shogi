@@ -341,7 +341,7 @@ function showPlayerSelectDialog() {
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると動けなくなり、カウンター8から毎手番カウントダウンし、0になると自動的に出産します（1手消費）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると動けなくなり、カウンター10から毎手番カウントダウンし、0になると自動的に出産します（1手消費）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentLevel) {
@@ -1164,7 +1164,7 @@ function aiMove() {
     // 王家将棋: AIの特殊手処理
     if (gameVariant === 'ouke') {
       if (move.type === 'promote_nin') {
-        ninPregnancy[move.tr + ',' + move.tc] = 8;
+        ninPregnancy[move.tr + ',' + move.tc] = 10;
       }
       if (move.type === 'abort_nin') {
         delete ninPregnancy[move.tr + ',' + move.tc];
@@ -1599,7 +1599,7 @@ function executePromoteToNin(r, c) {
   commitThinkTime(currentTurn, elapsed);
   pushHistory();
   board[r][c] = currentTurn * NIN;
-  ninPregnancy[r + ',' + c] = 8; // 8手後に出産
+  ninPregnancy[r + ',' + c] = 10; // 10カウントで出産
   lastMove = { tr: r, tc: c };
   selected = null; selectedHand = null;
   turn = -currentTurn;
