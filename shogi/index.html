@@ -173,14 +173,22 @@ async function initMctsWorkers() {
     }
   }
 
-  // Method 2: Blob URL workers (file:// fallback)
+  // Method 2: Blob URL workers (file:// fallback — uses XHR since fetch is blocked on file://)
   try {
-    const [glueResponse, wasmResponse] = await Promise.all([
-      fetch('./shogi-engine/pkg/shogi_engine.js'),
-      fetch('./shogi-engine/pkg/shogi_engine_bg.wasm')
+    function xhrGet(url, responseType) {
+      return new Promise(function(resolve, reject) {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url);
+        if (responseType) xhr.responseType = responseType;
+        xhr.onload = function() { resolve(responseType ? xhr.response : xhr.responseText); };
+        xhr.onerror = function() { reject(new Error('XHR failed: ' + url)); };
+        xhr.send();
+      });
+    }
+    const [glueCode, wasmBytes] = await Promise.all([
+      xhrGet('./shogi-engine/pkg/shogi_engine.js'),
+      xhrGet('./shogi-engine/pkg/shogi_engine_bg.wasm', 'arraybuffer')
     ]);
-    const glueCode = await glueResponse.text();
-    const wasmBytes = await wasmResponse.arrayBuffer();
     const wasmModule = await WebAssembly.compile(wasmBytes);
 
     // Strip ES module syntax from glue code
