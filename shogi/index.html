@@ -154,17 +154,105 @@ loadWasmEngine();
 // MCTS Web Worker pool for parallel search
 let mctsWorkerPool = [];
 let mctsWorkersReady = false;
-function initMctsWorkers() {
+async function initMctsWorkers() {
   const numWorkers = Math.min(navigator.hardwareConcurrency || 1, 8);
-  try {
-    for (let i = 0; i < numWorkers; i++) {
-      const worker = new Worker('./shogi-worker.js', { type: 'module' });
-      mctsWorkerPool.push(worker);
+  if (numWorkers < 1) return;
+
+  // Method 1: Module workers (works on http:// / https://)
+  if (location.protocol !== 'file:') {
+    try {
+      for (let i = 0; i < numWorkers; i++) {
+        mctsWorkerPool.push(new Worker('./shogi-worker.js', { type: 'module' }));
+      }
+      mctsWorkersReady = true;
+      console.log('MCTS worker pool: ' + numWorkers + ' module workers');
+      return;
+    } catch(e) {
+      console.warn('Module workers failed:', e);
+      mctsWorkerPool = [];
     }
-    mctsWorkersReady = numWorkers > 0;
-    console.log(`MCTS worker pool: ${numWorkers} workers`);
+  }
+
+  // Method 2: Blob URL workers (file:// fallback)
+  try {
+    const [glueResponse, wasmResponse] = await Promise.all([
+      fetch('./shogi-engine/pkg/shogi_engine.js'),
+      fetch('./shogi-engine/pkg/shogi_engine_bg.wasm')
+    ]);
+    const glueCode = await glueResponse.text();
+    const wasmBytes = await wasmResponse.arrayBuffer();
+    const wasmModule = await WebAssembly.compile(wasmBytes);
+
+    // Strip ES module syntax from glue code
+    const modifiedGlue = glueCode
+      .replace(/^export function /gm, 'function ')
+      .replace(/^export \{[^}]*\};?\s*$/gm, '')
+      .replace(/import\.meta\.url/g, "'unused'");
+
+    const workerHandler = '\n\
+let _workerReady = false;\n\
+self.onmessage = function(e) {\n\
+  if (e.data.type === "init") {\n\
+    initSync(e.data.wasmModule);\n\
+    _workerReady = true;\n\
+    self.postMessage({ type: "ready" });\n\
+    return;\n\
+  }\n\
+  if (!_workerReady) return;\n\
+  var d = e.data;\n\
+  var stats = wasm_mcts_search_stats(\n\
+    new Int8Array(d.board), new Uint8Array(d.sHand), new Uint8Array(d.gHand),\n\
+    d.simulations, d.maximizing, d.timeLimit, d.variantCode\n\
+  );\n\
+  var result = [];\n\
+  for (var i = 0; i < stats.length; i++) {\n\
+    var s = stats[i];\n\
+    result.push({ type: s.type, fr: s.fr, fc: s.fc, tr: s.tr, tc: s.tc,\n\
+      promote: s.promote, piece: s.piece, visits: s.visits, value: s.value });\n\
+  }\n\
+  self.postMessage({ requestId: d.requestId, stats: result });\n\
+};\n';
+
+    const blob = new Blob([modifiedGlue + workerHandler], { type: 'application/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const readyPromises = [];
+    for (let i = 0; i < numWorkers; i++) {
+      const worker = new Worker(blobUrl);
+      mctsWorkerPool.push(worker);
+      readyPromises.push(new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 5000);
+        const handler = function(ev) {
+          if (ev.data.type === 'ready') {
+            clearTimeout(timeout);
+            worker.removeEventListener('message', handler);
+            resolve(true);
+          }
+        };
+        worker.addEventListener('message', handler);
+        worker.onerror = () => { clearTimeout(timeout); resolve(false); };
+      }));
+      worker.postMessage({ type: 'init', wasmModule });
+    }
+
+    const results = await Promise.all(readyPromises);
+    const readyWorkers = [];
+    for (let i = 0; i < mctsWorkerPool.length; i++) {
+      if (results[i]) {
+        readyWorkers.push(mctsWorkerPool[i]);
+      } else {
+        mctsWorkerPool[i].terminate();
+      }
+    }
+    mctsWorkerPool = readyWorkers;
+    mctsWorkersReady = readyWorkers.length > 0;
+    URL.revokeObjectURL(blobUrl);
+    console.log('MCTS worker pool: ' + readyWorkers.length + ' blob workers');
+    if (mctsWorkersReady && typeof render === 'function') render();
   } catch(e) {
-    console.warn('Web Worker init failed, MCTS will run single-threaded:', e);
+    console.warn('Blob worker fallback failed:', e);
+    mctsWorkerPool = [];
+    mctsWorkersReady = false;
   }
 }
 initMctsWorkers();
@@ -1750,7 +1838,9 @@ function getPlayerLabel(side) {
   if (algo === 'mcts') {
     const mctsIdx = side === 'sente' ? senteMctsLevel : goteMctsLevel;
     const lv = MCTS_LEVELS[mctsIdx];
-    const cores = mctsWorkerPool.length > 1 ? ' ×' + mctsWorkerPool.length : '';
+    const cores = mctsWorkersReady && mctsWorkerPool.length > 0
+      ? ' ×' + mctsWorkerPool.length
+      : '';
     return 'MCTS(' + (lv ? lv.label : '不明') + cores + ')';
   }
   const levelIdx = side === 'sente' ? senteAiLevel : goteAiLevel;
