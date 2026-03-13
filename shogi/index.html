@@ -211,12 +211,23 @@ let gameVariant = 'normal'; // 'normal' | 'ouke'
 let ninPregnancy = {};
 let senteAiLevel = 4;    // AI level index for sente (0-based)
 let goteAiLevel = 4;     // AI level index for gote (0-based)
+let senteAlgorithm = 'minimax'; // 'minimax' | 'mcts'
+let goteAlgorithm = 'minimax';
+let senteMctsLevel = 2;  // MCTS level index (0-based)
+let goteMctsLevel = 2;
 const AI_LEVELS = [
   { label: 'Lv.1', depth: 3, timeLimit: 0 },
   { label: 'Lv.2', depth: 4, timeLimit: 0 },
   { label: 'Lv.3', depth: 5, timeLimit: 4000 },
   { label: 'Lv.4', depth: 5, timeLimit: 0 },
   { label: 'Lv.5', depth: 6, timeLimit: 0 }
+];
+const MCTS_LEVELS = [
+  { label: 'Lv.1', simulations: 500,   timeLimit: 0 },
+  { label: 'Lv.2', simulations: 1000,  timeLimit: 0 },
+  { label: 'Lv.3', simulations: 3000,  timeLimit: 5000 },
+  { label: 'Lv.4', simulations: 5000,  timeLimit: 0 },
+  { label: 'Lv.5', simulations: 10000, timeLimit: 0 }
 ];
 
 // Timing state
@@ -370,6 +381,10 @@ function showPlayerSelectDialog() {
   let selVariant = gameVariant;
   let selSenteLevel = senteAiLevel;
   let selGoteLevel = goteAiLevel;
+  let selSenteAlgo = senteAlgorithm;
+  let selGoteAlgo = goteAlgorithm;
+  let selSenteMctsLevel = senteMctsLevel;
+  let selGoteMctsLevel = goteMctsLevel;
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
@@ -381,6 +396,23 @@ function showPlayerSelectDialog() {
       `<div class="toggle-btn small ${i === currentLevel ? 'active' : ''}" data-val="${i}">${l.label}</div>`
     ).join('');
   }
+  function mctsLevelButtons(id, currentLevel) {
+    return MCTS_LEVELS.map((l, i) =>
+      `<div class="toggle-btn small ${i === currentLevel ? 'active' : ''}" data-val="${i}">${l.label}</div>`
+    ).join('');
+  }
+
+  function algoRowsVisible(side, selType, selAlgo) {
+    const isAi = selType === 'ai';
+    const isMinimax = selAlgo === 'minimax';
+    return {
+      algo: isAi ? 'flex' : 'none',
+      minimax: isAi && isMinimax ? 'flex' : 'none',
+      mcts: isAi && !isMinimax ? 'flex' : 'none',
+    };
+  }
+  const goteVis = algoRowsVisible('gote', selGote, selGoteAlgo);
+  const senteVis = algoRowsVisible('sente', selSente, selSenteAlgo);
 
   buttons.innerHTML = `
     <div class="select-row">
@@ -398,9 +430,20 @@ function showPlayerSelectDialog() {
         <div class="toggle-btn ${selGote === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
       </div>
     </div>
-    <div class="select-row ai-level-row" id="gote-level-row" style="display:${selGote === 'ai' ? 'flex' : 'none'}">
+    <div class="select-row ai-level-row" id="gote-algo-row" style="display:${goteVis.algo}">
+      <span>　△アルゴリズム：</span>
+      <div class="toggle-group" id="gote-algo-toggle">
+        <div class="toggle-btn ${selGoteAlgo === 'minimax' ? 'active' : ''}" data-val="minimax">minimax</div>
+        <div class="toggle-btn ${selGoteAlgo === 'mcts' ? 'active' : ''}" data-val="mcts">MCTS</div>
+      </div>
+    </div>
+    <div class="select-row ai-level-row" id="gote-level-row" style="display:${goteVis.minimax}">
       <span>　△AIレベル：</span>
       <div class="toggle-group" id="gote-level-toggle">${aiLevelButtons('gote-level', selGoteLevel)}</div>
+    </div>
+    <div class="select-row ai-level-row" id="gote-mcts-row" style="display:${goteVis.mcts}">
+      <span>　△MCTSレベル：</span>
+      <div class="toggle-group" id="gote-mcts-toggle">${mctsLevelButtons('gote-mcts', selGoteMctsLevel)}</div>
     </div>
     <div class="select-row">
       <span>▲先手（下側）：</span>
@@ -409,9 +452,20 @@ function showPlayerSelectDialog() {
         <div class="toggle-btn ${selSente === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
       </div>
     </div>
-    <div class="select-row ai-level-row" id="sente-level-row" style="display:${selSente === 'ai' ? 'flex' : 'none'}">
+    <div class="select-row ai-level-row" id="sente-algo-row" style="display:${senteVis.algo}">
+      <span>　▲アルゴリズム：</span>
+      <div class="toggle-group" id="sente-algo-toggle">
+        <div class="toggle-btn ${selSenteAlgo === 'minimax' ? 'active' : ''}" data-val="minimax">minimax</div>
+        <div class="toggle-btn ${selSenteAlgo === 'mcts' ? 'active' : ''}" data-val="mcts">MCTS</div>
+      </div>
+    </div>
+    <div class="select-row ai-level-row" id="sente-level-row" style="display:${senteVis.minimax}">
       <span>　▲AIレベル：</span>
       <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteLevel)}</div>
+    </div>
+    <div class="select-row ai-level-row" id="sente-mcts-row" style="display:${senteVis.mcts}">
+      <span>　▲MCTSレベル：</span>
+      <div class="toggle-group" id="sente-mcts-toggle">${mctsLevelButtons('sente-mcts', selSenteMctsLevel)}</div>
     </div>
     <button class="start-btn" id="start-game-btn">対局開始</button>
   `;
@@ -430,16 +484,28 @@ function showPlayerSelectDialog() {
     selVariant = v;
     document.getElementById('variant-desc').innerHTML = VARIANT_DESC[v];
   });
-  setupToggle('sente-toggle', v => {
-    selSente = v;
-    document.getElementById('sente-level-row').style.display = v === 'ai' ? 'flex' : 'none';
-  });
-  setupToggle('gote-toggle', v => {
-    selGote = v;
-    document.getElementById('gote-level-row').style.display = v === 'ai' ? 'flex' : 'none';
-  });
+  function updateSenteRows() {
+    const isAi = selSente === 'ai';
+    const isMinimax = selSenteAlgo === 'minimax';
+    document.getElementById('sente-algo-row').style.display = isAi ? 'flex' : 'none';
+    document.getElementById('sente-level-row').style.display = isAi && isMinimax ? 'flex' : 'none';
+    document.getElementById('sente-mcts-row').style.display = isAi && !isMinimax ? 'flex' : 'none';
+  }
+  function updateGoteRows() {
+    const isAi = selGote === 'ai';
+    const isMinimax = selGoteAlgo === 'minimax';
+    document.getElementById('gote-algo-row').style.display = isAi ? 'flex' : 'none';
+    document.getElementById('gote-level-row').style.display = isAi && isMinimax ? 'flex' : 'none';
+    document.getElementById('gote-mcts-row').style.display = isAi && !isMinimax ? 'flex' : 'none';
+  }
+  setupToggle('sente-toggle', v => { selSente = v; updateSenteRows(); });
+  setupToggle('gote-toggle', v => { selGote = v; updateGoteRows(); });
+  setupToggle('sente-algo-toggle', v => { selSenteAlgo = v; updateSenteRows(); });
+  setupToggle('gote-algo-toggle', v => { selGoteAlgo = v; updateGoteRows(); });
   setupToggle('sente-level-toggle', v => selSenteLevel = parseInt(v));
   setupToggle('gote-level-toggle', v => selGoteLevel = parseInt(v));
+  setupToggle('sente-mcts-toggle', v => selSenteMctsLevel = parseInt(v));
+  setupToggle('gote-mcts-toggle', v => selGoteMctsLevel = parseInt(v));
 
   buttons.querySelector('#start-game-btn').addEventListener('click', () => {
     senteType = selSente;
@@ -447,6 +513,10 @@ function showPlayerSelectDialog() {
     gameVariant = selVariant;
     senteAiLevel = selSenteLevel;
     goteAiLevel = selGoteLevel;
+    senteAlgorithm = selSenteAlgo;
+    goteAlgorithm = selGoteAlgo;
+    senteMctsLevel = selSenteMctsLevel;
+    goteMctsLevel = selGoteMctsLevel;
     initBoard();
     render();
     hideModal();
@@ -1161,16 +1231,25 @@ function aiMove() {
 
   // Delay to allow initial UI update before blocking minimax
   setTimeout(() => {
+    const algo = currentTurn === SENTE ? senteAlgorithm : goteAlgorithm;
     const levelIdx = currentTurn === SENTE ? senteAiLevel : goteAiLevel;
     const level = AI_LEVELS[levelIdx];
     let result;
     if (wasmEngine) {
-      // Use Rust+WASM engine
       const flatBoard = boardToFlat(board);
       const sHand = handToArray(senteHand);
       const gHand = handToArray(goteHand);
       const variantCode = gameVariant === 'ouke' ? 1 : 0;
-      const wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
+      let wasmResult;
+      if (algo === 'mcts') {
+        // MCTS engine
+        const mctsLvIdx = currentTurn === SENTE ? senteMctsLevel : goteMctsLevel;
+        const mctsLv = MCTS_LEVELS[mctsLvIdx];
+        wasmResult = wasmEngine.wasm_mcts_search(flatBoard, sHand, gHand, mctsLv.simulations, maximizing, mctsLv.timeLimit, variantCode);
+      } else {
+        // Minimax engine
+        wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
+      }
       if (wasmResult.found) {
         const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
         result = {
@@ -1187,7 +1266,7 @@ function aiMove() {
         result = { score: wasmResult.score, move: null };
       }
     } else {
-      // Fallback to JS engine
+      // Fallback to JS engine (minimax only)
       result = iterativeDeepening(board, senteHand, goteHand, level.depth, maximizing, currentTurn, level.timeLimit);
     }
     clearInterval(thinkTimer);
@@ -1575,6 +1654,12 @@ function renderMoveArrow() {
 function getPlayerLabel(side) {
   const type = side === 'sente' ? senteType : goteType;
   if (type === 'human') return '人間';
+  const algo = side === 'sente' ? senteAlgorithm : goteAlgorithm;
+  if (algo === 'mcts') {
+    const mctsIdx = side === 'sente' ? senteMctsLevel : goteMctsLevel;
+    const lv = MCTS_LEVELS[mctsIdx];
+    return 'MCTS(' + (lv ? lv.label : '不明') + ')';
+  }
   const levelIdx = side === 'sente' ? senteAiLevel : goteAiLevel;
   const level = AI_LEVELS[levelIdx];
   return 'AI(' + (level ? level.label : '不明') + ')';
