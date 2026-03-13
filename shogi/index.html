@@ -175,13 +175,14 @@ let aiTimerId = null;     // setTimeout ID for pending AI move
 let gameVariant = 'normal'; // 'normal' | 'ougo' | 'ouke'
 // 王家将棋: 妊娠カウンター（座標ベース。キー="r,c"、値=残りターン数。0=出産ターン、1-8=待機中）
 let ninPregnancy = {};
-let senteAiDepth = 5;    // AI search depth for sente
-let goteAiDepth = 5;     // AI search depth for gote
+let senteAiLevel = 4;    // AI level index for sente (0-based)
+let goteAiLevel = 4;     // AI level index for gote (0-based)
 const AI_LEVELS = [
-  { label: '弱い', depth: 2 },
-  { label: '普通', depth: 3 },
-  { label: '強い', depth: 4 },
-  { label: '最強', depth: 5 }
+  { label: '弱い', depth: 2, timeLimit: 0 },
+  { label: '普通', depth: 3, timeLimit: 0 },
+  { label: '強い', depth: 4, timeLimit: 0 },
+  { label: 'とても強い', depth: 5, timeLimit: 3000 },
+  { label: '最強', depth: 5, timeLimit: 0 }
 ];
 
 // Timing state
@@ -336,8 +337,8 @@ function showPlayerSelectDialog() {
   let selSente = senteType;
   let selGote = goteType;
   let selVariant = gameVariant;
-  let selSenteDepth = senteAiDepth;
-  let selGoteDepth = goteAiDepth;
+  let selSenteLevel = senteAiLevel;
+  let selGoteLevel = goteAiLevel;
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
@@ -345,9 +346,9 @@ function showPlayerSelectDialog() {
     ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
-  function aiLevelButtons(id, currentDepth) {
-    return AI_LEVELS.map(l =>
-      `<div class="toggle-btn small ${l.depth === currentDepth ? 'active' : ''}" data-val="${l.depth}">${l.label}</div>`
+  function aiLevelButtons(id, currentLevel) {
+    return AI_LEVELS.map((l, i) =>
+      `<div class="toggle-btn small ${i === currentLevel ? 'active' : ''}" data-val="${i}">${l.label}</div>`
     ).join('');
   }
 
@@ -370,7 +371,7 @@ function showPlayerSelectDialog() {
     </div>
     <div class="select-row ai-level-row" id="sente-level-row" style="display:${selSente === 'ai' ? 'flex' : 'none'}">
       <span>　▲AIの強さ：</span>
-      <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteDepth)}</div>
+      <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteLevel)}</div>
     </div>
     <div class="select-row">
       <span>△後手（上側）：</span>
@@ -381,7 +382,7 @@ function showPlayerSelectDialog() {
     </div>
     <div class="select-row ai-level-row" id="gote-level-row" style="display:${selGote === 'ai' ? 'flex' : 'none'}">
       <span>　△AIの強さ：</span>
-      <div class="toggle-group" id="gote-level-toggle">${aiLevelButtons('gote-level', selGoteDepth)}</div>
+      <div class="toggle-group" id="gote-level-toggle">${aiLevelButtons('gote-level', selGoteLevel)}</div>
     </div>
     <button class="start-btn" id="start-game-btn">対局開始</button>
   `;
@@ -408,15 +409,15 @@ function showPlayerSelectDialog() {
     selGote = v;
     document.getElementById('gote-level-row').style.display = v === 'ai' ? 'flex' : 'none';
   });
-  setupToggle('sente-level-toggle', v => selSenteDepth = parseInt(v));
-  setupToggle('gote-level-toggle', v => selGoteDepth = parseInt(v));
+  setupToggle('sente-level-toggle', v => selSenteLevel = parseInt(v));
+  setupToggle('gote-level-toggle', v => selGoteLevel = parseInt(v));
 
   buttons.querySelector('#start-game-btn').addEventListener('click', () => {
     senteType = selSente;
     goteType = selGote;
     gameVariant = selVariant;
-    senteAiDepth = selSenteDepth;
-    goteAiDepth = selGoteDepth;
+    senteAiLevel = selSenteLevel;
+    goteAiLevel = selGoteLevel;
     initBoard();
     render();
     hideModal();
@@ -983,6 +984,14 @@ const MAX_DEPTH = 5;
 
 function minimax(boardState, sHand, gHand, depth, alpha, beta, maximizing, evalOwner) {
   searchNodes++;
+  // 時間制限チェック（1024ノードごと）
+  if (searchTimeLimit > 0 && (searchNodes & 1023) === 0) {
+    if (Date.now() - searchStartTime >= searchTimeLimit) {
+      searchAborted = true;
+      return { score: evaluate(boardState, sHand, gHand) };
+    }
+  }
+  if (searchAborted) return { score: evaluate(boardState, sHand, gHand) };
   const owner = maximizing ? SENTE : GOTE;
 
   if (depth === 0) return { score: evaluate(boardState, sHand, gHand) };
@@ -1046,15 +1055,25 @@ function minimax(boardState, sHand, gHand, depth, alpha, beta, maximizing, evalO
 }
 
 // --- Iterative Deepening ---
-function iterativeDeepening(boardState, sHand, gHand, maxDepth, maximizing, currentTurn) {
+let searchTimeLimit = 0; // 0 = no limit, >0 = ms limit
+let searchStartTime = 0;
+let searchAborted = false;
+
+function iterativeDeepening(boardState, sHand, gHand, maxDepth, maximizing, currentTurn, timeLimit) {
   ttGeneration++;
   let bestResult = { score: 0, move: null };
   searchNodes = 0;
+  searchTimeLimit = timeLimit || 0;
+  searchStartTime = Date.now();
+  searchAborted = false;
   for (let d = 1; d <= maxDepth; d++) {
     const result = minimax(boardState, sHand, gHand, d, -Infinity, Infinity, maximizing, d);
+    if (searchAborted) break; // 時間切れの場合、前回の結果を使う
     if (result.move) bestResult = result;
     // Early exit on forced mate
     if (Math.abs(result.score) > 90000) break;
+    // 時間制限チェック: 次の深さに進む前に残り時間を確認
+    if (searchTimeLimit > 0 && (Date.now() - searchStartTime) >= searchTimeLimit) break;
   }
   return bestResult;
 }
@@ -1091,8 +1110,9 @@ function aiMove() {
 
   // Delay to allow initial UI update before blocking minimax
   setTimeout(() => {
-    const depth = currentTurn === SENTE ? senteAiDepth : goteAiDepth;
-    const result = iterativeDeepening(board, senteHand, goteHand, depth, maximizing, currentTurn);
+    const levelIdx = currentTurn === SENTE ? senteAiLevel : goteAiLevel;
+    const level = AI_LEVELS[levelIdx];
+    const result = iterativeDeepening(board, senteHand, goteHand, level.depth, maximizing, currentTurn, level.timeLimit);
     clearInterval(thinkTimer);
     const thinkMs = Date.now() - thinkStart;
     // Update display with final elapsed time before committing
@@ -1427,9 +1447,9 @@ function renderBoard() {
 function getPlayerLabel(side) {
   const type = side === 'sente' ? senteType : goteType;
   if (type === 'human') return '人間';
-  const depth = side === 'sente' ? senteAiDepth : goteAiDepth;
-  const level = AI_LEVELS.find(l => l.depth === depth);
-  return 'AI(' + (level ? level.label : '深度' + depth) + ')';
+  const levelIdx = side === 'sente' ? senteAiLevel : goteAiLevel;
+  const level = AI_LEVELS[levelIdx];
+  return 'AI(' + (level ? level.label : '不明') + ')';
 }
 
 function renderHand(side) {
