@@ -178,11 +178,11 @@ let ninPregnancy = {};
 let senteAiLevel = 4;    // AI level index for sente (0-based)
 let goteAiLevel = 4;     // AI level index for gote (0-based)
 const AI_LEVELS = [
-  { label: '弱い', depth: 2, timeLimit: 0 },
-  { label: '普通', depth: 3, timeLimit: 0 },
-  { label: '強い', depth: 4, timeLimit: 0 },
-  { label: 'とても強い', depth: 5, timeLimit: 4000 },
-  { label: '最強', depth: 5, timeLimit: 0 }
+  { label: 'Lv.1', depth: 2, timeLimit: 0 },
+  { label: 'Lv.2', depth: 3, timeLimit: 0 },
+  { label: 'Lv.3', depth: 4, timeLimit: 0 },
+  { label: 'Lv.4', depth: 5, timeLimit: 4000 },
+  { label: 'Lv.5', depth: 5, timeLimit: 0 }
 ];
 
 // Timing state
@@ -357,17 +357,6 @@ function showPlayerSelectDialog() {
     </div>
     <div id="variant-desc" class="variant-desc">${VARIANT_DESC[selVariant]}</div>
     <div class="select-row">
-      <span>▲先手（下側）：</span>
-      <div class="toggle-group" id="sente-toggle">
-        <div class="toggle-btn ${selSente === 'human' ? 'active' : ''}" data-val="human">人間</div>
-        <div class="toggle-btn ${selSente === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
-      </div>
-    </div>
-    <div class="select-row ai-level-row" id="sente-level-row" style="display:${selSente === 'ai' ? 'flex' : 'none'}">
-      <span>　▲AIの強さ：</span>
-      <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteLevel)}</div>
-    </div>
-    <div class="select-row">
       <span>△後手（上側）：</span>
       <div class="toggle-group" id="gote-toggle">
         <div class="toggle-btn ${selGote === 'human' ? 'active' : ''}" data-val="human">人間</div>
@@ -375,8 +364,19 @@ function showPlayerSelectDialog() {
       </div>
     </div>
     <div class="select-row ai-level-row" id="gote-level-row" style="display:${selGote === 'ai' ? 'flex' : 'none'}">
-      <span>　△AIの強さ：</span>
+      <span>　△AIレベル：</span>
       <div class="toggle-group" id="gote-level-toggle">${aiLevelButtons('gote-level', selGoteLevel)}</div>
+    </div>
+    <div class="select-row">
+      <span>▲先手（下側）：</span>
+      <div class="toggle-group" id="sente-toggle">
+        <div class="toggle-btn ${selSente === 'human' ? 'active' : ''}" data-val="human">人間</div>
+        <div class="toggle-btn ${selSente === 'ai' ? 'active' : ''}" data-val="ai">AI</div>
+      </div>
+    </div>
+    <div class="select-row ai-level-row" id="sente-level-row" style="display:${selSente === 'ai' ? 'flex' : 'none'}">
+      <span>　▲AIレベル：</span>
+      <div class="toggle-group" id="sente-level-toggle">${aiLevelButtons('sente-level', selSenteLevel)}</div>
     </div>
     <button class="start-btn" id="start-game-btn">対局開始</button>
   `;
@@ -1322,7 +1322,14 @@ function checkAfterMove() {
     render();
     if (isInCheck(board, nextPlayer)) {
       const winner = turnName(-nextPlayer);
-      updateStatus('詰みです。' + winner + 'の勝ち！');
+      const winnerSide = -nextPlayer;
+      updateStatus(history.length + '手で詰みです。' + winner + 'の勝ち！');
+      // 勝者1000、敗者0で表示
+      const senteScore = winnerSide === SENTE ? 1000 : 0;
+      const goteScore = 1000 - senteScore;
+      document.getElementById('score-sente-label').textContent = `▲先手: ${senteScore}`;
+      document.getElementById('score-gote-label').textContent = `△後手: ${goteScore}`;
+      document.getElementById('bar-sente').style.height = (winnerSide === SENTE ? '98%' : '2%');
     } else {
       updateStatus('引き分け（ステイルメイト）');
     }
