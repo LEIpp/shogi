@@ -172,7 +172,7 @@ let senteType = 'human'; // 'human' | 'ai'
 let goteType = 'ai';     // 'human' | 'ai'
 let aiPaused = false;     // AI vs AI pause state
 let aiTimerId = null;     // setTimeout ID for pending AI move
-let gameVariant = 'normal'; // 'normal' | 'ougo' | 'ouke'
+let gameVariant = 'normal'; // 'normal' | 'ouke'
 // 王家将棋: 妊娠カウンター（座標ベース。キー="r,c"、値=残りターン数。0=出産ターン、1-8=待機中）
 let ninPregnancy = {};
 let senteAiLevel = 4;    // AI level index for sente (0-based)
@@ -298,10 +298,6 @@ function initBoard() {
   board[7][1] = KA; board[7][7] = HI;
   board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
   board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
-  if (gameVariant === 'ougo') {
-    board[8][3] = HM;   // 先手の妃（左金の位置）
-    board[0][5] = -HM;  // 後手の妃（ミラー配置）
-  }
   // 王家将棋: 通常将棋と同じ配置（金が王の左右に1枚ずつ）
 }
 
@@ -342,8 +338,7 @@ function showPlayerSelectDialog() {
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
-    ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します（ターン消費なし）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentLevel) {
@@ -357,7 +352,6 @@ function showPlayerSelectDialog() {
       <span>将棋の種類：</span>
       <div class="toggle-group" id="variant-toggle">
         <div class="toggle-btn ${selVariant === 'normal' ? 'active' : ''}" data-val="normal">通常将棋</div>
-        <div class="toggle-btn ${selVariant === 'ougo' ? 'active' : ''}" data-val="ougo">王后将棋</div>
         <div class="toggle-btn ${selVariant === 'ouke' ? 'active' : ''}" data-val="ouke">王家将棋</div>
       </div>
     </div>
@@ -1743,7 +1737,7 @@ function hideModal() {
 }
 
 function getVariantName() {
-  return gameVariant === 'ougo' ? '王后将棋' : gameVariant === 'ouke' ? '王家将棋' : '将棋';
+  return gameVariant === 'ouke' ? '王家将棋' : '将棋';
 }
 function updateTitle() {
   document.getElementById('game-title').textContent = getVariantName();
