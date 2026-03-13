@@ -372,11 +372,11 @@ const AI_LEVELS = [
   { label: 'Lv.5', depth: 6, timeLimit: 0 }
 ];
 const MCTS_LEVELS = [
-  { label: 'Lv.1', simulations: 500,   timeLimit: 0 },
-  { label: 'Lv.2', simulations: 1000,  timeLimit: 0 },
-  { label: 'Lv.3', simulations: 3000,  timeLimit: 5000 },
-  { label: 'Lv.4', simulations: 5000,  timeLimit: 0 },
-  { label: 'Lv.5', simulations: 10000, timeLimit: 0 }
+  { label: '1秒',  simulations: 999999, timeLimit: 1000 },
+  { label: '2秒',  simulations: 999999, timeLimit: 2000 },
+  { label: '5秒',  simulations: 999999, timeLimit: 5000 },
+  { label: '10秒', simulations: 999999, timeLimit: 10000 },
+  { label: '20秒', simulations: 999999, timeLimit: 20000 }
 ];
 
 // Timing state
