@@ -1267,7 +1267,7 @@ function renderBoard() {
           if (rem > 0) {
             const counter = document.createElement('span');
             counter.style.cssText = 'font-size:9px;position:absolute;bottom:0;right:1px;color:#ff6600;font-weight:bold;text-shadow:0 0 2px #000;';
-            counter.textContent = 'あと' + rem;
+            counter.textContent = rem;
             pieceEl.style.position = 'relative';
             pieceEl.appendChild(counter);
           } else if (rem === 0) {
