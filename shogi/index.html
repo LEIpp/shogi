@@ -1260,20 +1260,20 @@ function renderBoard() {
         if (a === OU && getPieceOwner(p) === GOTE) {
           pieceEl.textContent = '玉';
         }
-        // 王家将棋: 妊娠中の妊にカウンター表示
+        // 王家将棋: 妊にあと何手で出産かカウンター表示
         if (a === NIN && gameVariant === 'ouke') {
-          const owner = getPieceOwner(p);
-          const rem = ninPregnancy[owner];
+          const ninOwner = getPieceOwner(p);
+          const rem = ninPregnancy[ninOwner];
           if (rem > 0) {
             const counter = document.createElement('span');
-            counter.style.cssText = 'font-size:10px;position:absolute;bottom:1px;right:2px;color:#cc0000;font-weight:bold;';
-            counter.textContent = rem;
+            counter.style.cssText = 'font-size:9px;position:absolute;bottom:0;right:1px;color:#ff6600;font-weight:bold;text-shadow:0 0 2px #000;';
+            counter.textContent = 'あと' + rem;
             pieceEl.style.position = 'relative';
             pieceEl.appendChild(counter);
           } else if (rem === 0) {
             const counter = document.createElement('span');
-            counter.style.cssText = 'font-size:10px;position:absolute;bottom:1px;right:2px;color:#009900;font-weight:bold;';
-            counter.textContent = '産';
+            counter.style.cssText = 'font-size:9px;position:absolute;bottom:0;right:1px;color:#00cc00;font-weight:bold;text-shadow:0 0 2px #000;';
+            counter.textContent = '出産';
             pieceEl.style.position = 'relative';
             pieceEl.appendChild(counter);
           }
