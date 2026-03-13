@@ -1229,8 +1229,7 @@ function processAutoBirth(player) {
     }
   }
 
-  // 出産はターン消費
-  turn = -player;
+  // 出産は自動で行われるためターンを消費しない
   selected = null; selectedHand = null;
   render();
   return true;
