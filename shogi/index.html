@@ -1376,7 +1376,7 @@ function renderBoard() {
         const a = absPiece(p);
         const isPromo = isPromoted(p);
         pieceEl.textContent = PIECE_NAMES[a];
-        if (isPromo) pieceEl.style.color = '#cc0000';
+        if (isPromo || a === HM || a === NIN) pieceEl.style.color = '#cc0000';
         if (a === OU && getPieceOwner(p) === GOTE) {
           pieceEl.textContent = '玉';
         }
