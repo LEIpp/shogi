@@ -173,6 +173,8 @@ let goteType = 'ai';     // 'human' | 'ai'
 let aiPaused = false;     // AI vs AI pause state
 let aiTimerId = null;     // setTimeout ID for pending AI move
 let gameVariant = 'normal'; // 'normal' | 'ougo' | 'ouke'
+// 王家将棋: 妊娠カウンター（各陣営の残りターン数。-1=妊娠なし、0=出産ターン、1-8=待機中）
+let ninPregnancy = { [SENTE]: -1, [GOTE]: -1 };
 let senteAiDepth = 5;    // AI search depth for sente
 let goteAiDepth = 5;     // AI search depth for gote
 const AI_LEVELS = [
@@ -314,6 +316,7 @@ function resetGame() {
   aiPaused = false;
   history = [];
   undoneHistory = [];
+  ninPregnancy = { [SENTE]: -1, [GOTE]: -1 };
   senteThinkTotal = 0; goteThinkTotal = 0;
   senteThinkCurrent = 0; goteThinkCurrent = 0;
   render();
@@ -338,7 +341,7 @@ function showPlayerSelectDialog() {
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
     ougo: '<b>王后将棋</b> - 新駒「妃」が登場。<br>妃は王と同じ動き（8方向1マス）。<br>妃を取られても負けにはならず、取った妃は持ち駒として使えます。<br>初期配置: 左の金の位置に妃を配置（金は1枚）。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊は前後左右に1マス動けますが、斜めには動けません。<br>妊を選択すると、前に「子」を産むことができます。子を産んだ妊は「妃」になります。<br>妃は王と同じく8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は前に1マスまたは2マス移動可能（飛び越え可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は前に1マスまたは2マス移動可能（飛び越え可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentDepth) {
@@ -437,10 +440,27 @@ function pushHistory() {
     board: cloneBoard(board),
     senteHand: {...senteHand},
     goteHand: {...goteHand},
-    turn, lastMove, gameOver
+    turn, lastMove, gameOver,
+    ninPregnancy: { ...ninPregnancy }
   });
   // Clear forward history when a new move is made
   undoneHistory = [];
+}
+
+function restoreState(state) {
+  board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
+  turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+  if (state.ninPregnancy) ninPregnancy = { ...state.ninPregnancy };
+}
+
+function captureCurrentState() {
+  return {
+    board: cloneBoard(board),
+    senteHand: {...senteHand},
+    goteHand: {...goteHand},
+    turn, lastMove, gameOver,
+    ninPregnancy: { ...ninPregnancy }
+  };
 }
 
 function undoMove() {
@@ -453,20 +473,13 @@ function undoMove() {
     // AI vs AI: set pause flag immediately (even during animation)
     aiPaused = true;
     if (animating) {
-      // AI is currently thinking/animating - just pause, undo will happen after animation
       updateStatus('一時停止中...');
       updateControls();
       return;
     }
     const state = history.pop();
-    undoneHistory.push({
-      board: cloneBoard(board),
-      senteHand: {...senteHand},
-      goteHand: {...goteHand},
-      turn, lastMove, gameOver
-    });
-    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    undoneHistory.push(captureCurrentState());
+    restoreState(state);
     selected = null; selectedHand = null;
     render();
     updateScoreDisplay();
@@ -480,21 +493,16 @@ function undoMove() {
 
   const bothHuman = (senteType === 'human' && goteType === 'human');
   if (bothHuman) {
-    // Human vs Human: 1 step back
     const state = history.pop();
-    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    restoreState(state);
   } else {
-    // Human vs AI: 2 steps back (AI + human)
     if (history.length >= 2) {
-      history.pop(); // AI's move
-      const state = history.pop(); // Human's move
-      board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-      turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+      history.pop();
+      const state = history.pop();
+      restoreState(state);
     } else {
       const state = history.pop();
-      board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-      turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+      restoreState(state);
     }
   }
   selected = null; selectedHand = null;
@@ -525,14 +533,8 @@ function forwardMove() {
   if (undoneHistory.length === 1) {
     // This is the last forward step = "Resume"
     const state = undoneHistory.pop();
-    history.push({
-      board: cloneBoard(board),
-      senteHand: {...senteHand},
-      goteHand: {...goteHand},
-      turn, lastMove, gameOver
-    });
-    board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-    turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+    history.push(captureCurrentState());
+    restoreState(state);
     selected = null; selectedHand = null;
     aiPaused = false;
     render();
@@ -549,14 +551,8 @@ function forwardMove() {
 
   // Regular forward
   const state = undoneHistory.pop();
-  history.push({
-    board: cloneBoard(board),
-    senteHand: {...senteHand},
-    goteHand: {...goteHand},
-    turn, lastMove, gameOver
-  });
-  board = state.board; senteHand = state.senteHand; goteHand = state.goteHand;
-  turn = state.turn; lastMove = state.lastMove; gameOver = state.gameOver;
+  history.push(captureCurrentState());
+  restoreState(state);
   selected = null; selectedHand = null;
   render();
   updateScoreDisplay();
@@ -794,16 +790,6 @@ function isCheckmatePosition(boardState, owner) {
       if (drops.length > 0) return false;
     }
   }
-  // 王家将棋: 子作成で王手回避できる場合
-  if (gameVariant === 'ouke') {
-    const koInfo = canCreateKo(boardState, owner);
-    if (koInfo) {
-      const nb = cloneBoard(boardState);
-      nb[koInfo.ninR][koInfo.ninC] = owner * HM;
-      nb[koInfo.targetR][koInfo.targetC] = owner * KO;
-      if (!isInCheck(nb, owner)) return false;
-    }
-  }
   return true;
 }
 
@@ -813,6 +799,8 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
     if (getPieceOwner(boardState[r][c]) !== owner) continue;
     const piece = boardState[r][c];
+    // 王家将棋: 妊娠中の妊は動けない
+    if (gameVariant === 'ouke' && absPiece(piece) === NIN && ninPregnancy[owner] > 0) continue;
     const targets = getPieceMoves(piece, r, c, boardState);
     for (const [tr, tc] of targets) {
       if (!isLegalMove(boardState, r, c, tr, tc, owner)) continue;
@@ -836,7 +824,7 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
       }
     }
   }
-  // 王家将棋: 金→妊昇格、妊→子作成
+  // 王家将棋: 金→妊昇格（子作成は自動出産で処理）
   if (gameVariant === 'ouke') {
     for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
       if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === KI) {
@@ -845,10 +833,8 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
         }
       }
     }
-    const koInfo = canCreateKo(boardState, owner);
-    if (koInfo) {
-      moves.push({ type:'create_ko', tr: koInfo.targetR, tc: koInfo.targetC, ninR: koInfo.ninR, ninC: koInfo.ninC });
-    }
+    // 妊娠中の妊は動かせない
+    // (getPieceMovesで返る手のうちNINを除外)
   }
   return moves;
 }
@@ -884,12 +870,6 @@ function applyMove(boardState, move, sHand, gHand, owner) {
   } else if (move.type === 'promote_nin') {
     // 金→妊（1手消費、駒は移動しない）
     nb[move.tr][move.tc] = owner * NIN;
-  } else if (move.type === 'create_ko') {
-    // 妊→妃に変化し、前に子を配置
-    const captured = nb[move.tr][move.tc];
-    addCaptureToHand(captured, myHand);
-    nb[move.ninR][move.ninC] = owner * HM;
-    nb[move.tr][move.tc] = owner * KO;
   } else {
     nb[move.tr][move.tc] = owner * move.piece;
     myHand[move.piece] = (myHand[move.piece] || 0) - 1;
@@ -1064,9 +1044,106 @@ function aiMove() {
   }, 50);
 }
 
+// 王家将棋: 妊の位置を探す
+function findNin(boardState, owner) {
+  for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
+    if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === NIN) {
+      return [r, c];
+    }
+  }
+  return null;
+}
+
+// 王家将棋: 自動出産処理（ターン開始時に呼ばれる）
+function processAutoBirth(player) {
+  if (gameVariant !== 'ouke') return false;
+  if (ninPregnancy[player] !== 0) return false;
+
+  const ninPos = findNin(board, player);
+  if (!ninPos) {
+    ninPregnancy[player] = -1;
+    return false;
+  }
+
+  const [ninR, ninC] = ninPos;
+  const dir = player === SENTE ? -1 : 1;
+  const targetR = ninR + dir;
+  const targetC = ninC;
+  const myHand = player === SENTE ? senteHand : goteHand;
+
+  pushHistory();
+
+  if (targetR < 0 || targetR >= BOARD_ROWS) {
+    // 盤外 → 死産（妃→金に戻る）
+    board[ninR][ninC] = player * KI;
+    ninPregnancy[player] = -1;
+    lastMove = { tr: ninR, tc: ninC };
+    updateStatus(turnName(player) + 'の妊が出産...盤外のため死産。金に戻りました。');
+  } else if (getPieceOwner(board[targetR][targetC]) === player) {
+    // 前に味方の駒 → 死産（妃→金に戻る）
+    board[ninR][ninC] = player * KI;
+    ninPregnancy[player] = -1;
+    lastMove = { tr: ninR, tc: ninC };
+    updateStatus(turnName(player) + 'の妊が出産...味方駒が邪魔で死産。金に戻りました。');
+  } else {
+    // 正常出産 or 敵駒を取って出産
+    const captured = board[targetR][targetC];
+    if (captured !== EMPTY) {
+      addCaptureToHand(captured, myHand);
+    }
+    board[ninR][ninC] = player * HM; // 妊→妃
+    board[targetR][targetC] = player * KO; // 子を配置
+    ninPregnancy[player] = -1;
+    lastMove = { tr: targetR, tc: targetC };
+    if (captured !== EMPTY) {
+      updateStatus(turnName(player) + 'の妊が出産！敵駒を取って子が生まれ、妃になりました。');
+    } else {
+      updateStatus(turnName(player) + 'の妊が出産！子が生まれ、妃になりました。');
+    }
+  }
+
+  // 出産はターン消費
+  turn = -player;
+  selected = null; selectedHand = null;
+  render();
+  return true;
+}
+
+// 王家将棋: 妊娠カウンターを進める（ターン開始時）
+function advancePregnancy(player) {
+  if (gameVariant !== 'ouke') return;
+  if (ninPregnancy[player] > 0) {
+    // 妊がまだ盤上に存在するか確認
+    const ninPos = findNin(board, player);
+    if (!ninPos) {
+      ninPregnancy[player] = -1; // 妊が取られた
+      return;
+    }
+    ninPregnancy[player]--;
+  }
+}
+
 // Unified post-move check
 function checkAfterMove() {
   const nextPlayer = turn;
+
+  // 王家将棋: 妊娠カウンター処理
+  if (gameVariant === 'ouke') {
+    // 自動出産チェック（カウンター==0なら出産実行）
+    if (ninPregnancy[nextPlayer] === 0) {
+      // 少し遅延して出産アニメーション
+      const birthDelay = isCurrentAI() ? 500 : 200;
+      setTimeout(() => {
+        processAutoBirth(nextPlayer);
+        // 出産後、次のターンを通常処理
+        checkAfterMove();
+      }, birthDelay);
+      return;
+    }
+    // カウンター減算
+    advancePregnancy(nextPlayer);
+  }
+
   const nextMoves = getAllLegalMoves(board, nextPlayer, senteHand, goteHand);
 
   updateScoreDisplay();
@@ -1175,6 +1252,24 @@ function renderBoard() {
         if (a === OU && getPieceOwner(p) === GOTE) {
           pieceEl.textContent = '玉';
         }
+        // 王家将棋: 妊娠中の妊にカウンター表示
+        if (a === NIN && gameVariant === 'ouke') {
+          const owner = getPieceOwner(p);
+          const rem = ninPregnancy[owner];
+          if (rem > 0) {
+            const counter = document.createElement('span');
+            counter.style.cssText = 'font-size:10px;position:absolute;bottom:1px;right:2px;color:#cc0000;font-weight:bold;';
+            counter.textContent = rem;
+            pieceEl.style.position = 'relative';
+            pieceEl.appendChild(counter);
+          } else if (rem === 0) {
+            const counter = document.createElement('span');
+            counter.style.cssText = 'font-size:10px;position:absolute;bottom:1px;right:2px;color:#009900;font-weight:bold;';
+            counter.textContent = '産';
+            pieceEl.style.position = 'relative';
+            pieceEl.appendChild(counter);
+          }
+        }
         cell.appendChild(pieceEl);
       }
 
@@ -1249,20 +1344,12 @@ function canPromoteToNin(boardState, r, c, owner) {
   return Math.abs(r - ouPos[0]) <= 1 && Math.abs(c - ouPos[1]) <= 1;
 }
 
-// 王家将棋: 妊が子を作れるか判定（妊の前に味方駒がなく、盤内であること）
-function canCreateKo(boardState, owner) {
-  if (gameVariant !== 'ouke') return null;
-  // 妊の位置を探す
+// 王家将棋: 妊が盤上にいるかチェック（AI評価用）
+function hasNinOnBoard(boardState, owner) {
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
-    if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === NIN) {
-      const dir = owner === SENTE ? -1 : 1;
-      const tr = r + dir, tc = c;
-      if (tr < 0 || tr >= BOARD_ROWS) return null;
-      if (getPieceOwner(boardState[tr][tc]) === owner) return null;
-      return { ninR: r, ninC: c, targetR: tr, targetC: tc, captured: boardState[tr][tc] };
-    }
+    if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === NIN) return true;
   }
-  return null;
+  return false;
 }
 
 // 王家将棋: 金→妊ダイアログ
@@ -1286,7 +1373,7 @@ function showPromoteToNinDialog(r, c) {
   modal.classList.add('show');
 }
 
-// 王家将棋: 金→妊実行（1手消費）
+// 王家将棋: 金→妊実行（1手消費、妊娠カウンター8セット）
 function executePromoteToNin(r, c) {
   const currentTurn = turn;
   stopHumanThinkTimer();
@@ -1294,6 +1381,7 @@ function executePromoteToNin(r, c) {
   commitThinkTime(currentTurn, elapsed);
   pushHistory();
   board[r][c] = currentTurn * NIN;
+  ninPregnancy[currentTurn] = 8; // 8手後に出産
   lastMove = { tr: r, tc: c };
   selected = null; selectedHand = null;
   turn = -currentTurn;
@@ -1301,52 +1389,7 @@ function executePromoteToNin(r, c) {
   checkAfterMove();
 }
 
-// 王家将棋: 子作成ダイアログ（妊クリック時）
-function showCreateKoDialog(koInfo) {
-  const modal = document.getElementById('modal-overlay');
-  const text = document.getElementById('modal-text');
-  const buttons = document.getElementById('modal-buttons');
-  text.textContent = '子を産みますか？';
-  buttons.innerHTML = '';
-  const btnYes = document.createElement('button');
-  btnYes.textContent = '産む';
-  btnYes.onclick = () => { hideModal(); executeCreateKo(koInfo); };
-  const btnNo = document.createElement('button');
-  btnNo.textContent = '通常移動';
-  btnNo.onclick = () => {
-    hideModal();
-    selected = [koInfo.ninR, koInfo.ninC]; selectedHand = null; render();
-  };
-  buttons.appendChild(btnYes);
-  buttons.appendChild(btnNo);
-  modal.classList.add('show');
-}
-
-// 王家将棋: 子作成実行（妊→妃に変化、前に子を配置）
-function executeCreateKo(koInfo) {
-  const currentTurn = turn;
-  const myHand = currentTurn === SENTE ? senteHand : goteHand;
-  stopHumanThinkTimer();
-  const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
-  commitThinkTime(currentTurn, elapsed);
-  pushHistory();
-  const captured = koInfo.captured;
-  if (captured !== EMPTY) {
-    const bt = baseType(captured);
-    if (bt !== KO && bt !== WK) {
-      myHand[bt] = (myHand[bt] || 0) + 1;
-    }
-  }
-  // 妊→妃に変化
-  board[koInfo.ninR][koInfo.ninC] = currentTurn * HM;
-  // 前に子を配置
-  board[koInfo.targetR][koInfo.targetC] = currentTurn * KO;
-  lastMove = { tr: koInfo.targetR, tc: koInfo.targetC };
-  selected = null; selectedHand = null;
-  turn = -currentTurn;
-  render();
-  checkAfterMove();
-}
+// 子作成は自動出産で処理（processAutoBirth）
 
 function onHandClick(pieceType, owner) {
   if (gameOver || animating || !isHumanTurn() || turn !== owner) return;
@@ -1434,11 +1477,10 @@ function onCellClick(r, c) {
         return;
       }
     }
-    // 王家将棋: 妊クリック時に子作成ダイアログ
+    // 王家将棋: 妊娠中の妊は選択不可（動けない）
     if (absPiece(board[r][c]) === NIN && gameVariant === 'ouke') {
-      const koInfo = canCreateKo(board, currentTurn);
-      if (koInfo && koInfo.ninR === r && koInfo.ninC === c) {
-        showCreateKoDialog(koInfo);
+      if (ninPregnancy[currentTurn] > 0) {
+        // 妊娠中は動けない - 選択しない
         return;
       }
     }
@@ -1463,6 +1505,11 @@ function executeMove(fr, fc, tr, tc, promote, captured) {
     board[tr][tc] = currentTurn * PROMOTE_MAP[a];
   }
   addCaptureToHand(captured, myHand);
+  // 王家将棋: 妊が取られたら妊娠カウンターをクリア
+  if (captured !== EMPTY && gameVariant === 'ouke' && absPiece(captured) === NIN) {
+    const capturedOwner = getPieceOwner(captured);
+    ninPregnancy[capturedOwner] = -1;
+  }
   lastMove = { fr, fc, tr, tc };
   selected = null; selectedHand = null;
   turn = -currentTurn;
