@@ -675,8 +675,7 @@ function getPieceMoves(piece, r, c, boardState) {
       addLine(-1,-1); addLine(-1,1); addLine(1,-1); addLine(1,1);
       addLine(-1,0); addLine(1,0); addLine(0,-1); addLine(0,1);
       break;
-    case NIN: // 妊: 前後左右に1マス（斜め不可）
-      addMove(r-1, c); addMove(r+1, c); addMove(r, c-1); addMove(r, c+1);
+    case NIN: // 妊: 出産まで一切動けない
       break;
     case OU: case HM: // 王・妃: 8方向1マス
       for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
@@ -808,8 +807,8 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
   for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
     if (getPieceOwner(boardState[r][c]) !== owner) continue;
     const piece = boardState[r][c];
-    // 王家将棋: 妊娠中の妊は動けない
-    if (gameVariant === 'ouke' && absPiece(piece) === NIN && ninPregnancy[owner] > 0) continue;
+    // 王家将棋: 妊は出産まで一切動けない
+    if (gameVariant === 'ouke' && absPiece(piece) === NIN) continue;
     const targets = getPieceMoves(piece, r, c, boardState);
     for (const [tr, tc] of targets) {
       if (!isLegalMove(boardState, r, c, tr, tc, owner)) continue;
@@ -1486,12 +1485,9 @@ function onCellClick(r, c) {
         return;
       }
     }
-    // 王家将棋: 妊娠中の妊は選択不可（動けない）
+    // 王家将棋: 妊は出産まで一切動けない - 選択不可
     if (absPiece(board[r][c]) === NIN && gameVariant === 'ouke') {
-      if (ninPregnancy[currentTurn] > 0) {
-        // 妊娠中は動けない - 選択しない
-        return;
-      }
+      return;
     }
     selected = [r, c]; selectedHand = null; render();
   }
