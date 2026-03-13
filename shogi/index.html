@@ -317,6 +317,7 @@ function resetGame() {
   history = [];
   undoneHistory = [];
   ninPregnancy = { [SENTE]: -1, [GOTE]: -1 };
+  ttClear();
   senteThinkTotal = 0; goteThinkTotal = 0;
   senteThinkCurrent = 0; goteThinkCurrent = 0;
   render();
@@ -912,59 +913,150 @@ function evaluate(boardState, sHand, gHand) {
   return score;
 }
 
-// Minimax with alpha-beta
+// --- Transposition Table ---
+const TT_EXACT = 0, TT_ALPHA = 1, TT_BETA = 2;
+const TT_SIZE = 1 << 20; // ~1M entries
+const TT_MASK = TT_SIZE - 1;
+let ttTable = new Array(TT_SIZE);
+let ttGeneration = 0;
+
+function ttClear() { ttTable = new Array(TT_SIZE); ttGeneration++; }
+
+function hashBoard(boardState, sHand, gHand, maximizing) {
+  // Simple but fast hash using board contents
+  let h = maximizing ? 1 : 0;
+  for (let r = 0; r < BOARD_ROWS; r++) {
+    for (let c = 0; c < BOARD_COLS; c++) {
+      h = (h * 31 + (boardState[r][c] + 50)) | 0;
+    }
+  }
+  for (const pt of HAND_PIECES) {
+    h = (h * 31 + (sHand[pt] || 0)) | 0;
+    h = (h * 31 + (gHand[pt] || 0)) | 0;
+  }
+  return h >>> 0; // unsigned
+}
+
+function ttProbe(hash, depth, alpha, beta) {
+  const entry = ttTable[hash & TT_MASK];
+  if (!entry || entry.hash !== hash || entry.gen !== ttGeneration) return null;
+  if (entry.depth < depth) return null;
+  if (entry.flag === TT_EXACT) return { score: entry.score, move: entry.move };
+  if (entry.flag === TT_ALPHA && entry.score <= alpha) return { score: alpha, move: entry.move };
+  if (entry.flag === TT_BETA && entry.score >= beta) return { score: beta, move: entry.move };
+  return null; // depth/bounds don't match, but return move for ordering
+}
+
+function ttStore(hash, depth, score, flag, move) {
+  const idx = hash & TT_MASK;
+  const entry = ttTable[idx];
+  // Replace if: empty, older generation, or shallower depth
+  if (!entry || entry.gen !== ttGeneration || entry.depth <= depth) {
+    ttTable[idx] = { hash, depth, score, flag, move, gen: ttGeneration };
+  }
+}
+
+// --- Move Ordering ---
+function scoreMoveForOrdering(m, boardState, ttBestMove) {
+  let s = 0;
+  // TT best move gets highest priority
+  if (ttBestMove && m.type === ttBestMove.type && m.tr === ttBestMove.tr && m.tc === ttBestMove.tc
+      && (!m.fr || m.fr === ttBestMove.fr) && (!m.fc || m.fc === ttBestMove.fc)
+      && m.promote === ttBestMove.promote) {
+    return 100000;
+  }
+  // Captures: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+  if (m.type === 'move' && boardState[m.tr][m.tc] !== EMPTY) {
+    const victim = PIECE_VALUES[absPiece(boardState[m.tr][m.tc])] || 0;
+    const attacker = m.fr !== undefined ? (PIECE_VALUES[absPiece(boardState[m.fr][m.fc])] || 100) : 100;
+    s += 10000 + victim * 10 - attacker;
+  }
+  if (m.promote) s += 5000;
+  if (m.type === 'move') s += 100;
+  if (m.type === 'promote_nin') s += 200;
+  return s;
+}
+
+// --- Minimax with alpha-beta, TT, iterative deepening support ---
+let searchNodes = 0;
 const MAX_DEPTH = 5;
+
 function minimax(boardState, sHand, gHand, depth, alpha, beta, maximizing, evalOwner) {
+  searchNodes++;
   const owner = maximizing ? SENTE : GOTE;
+
   if (depth === 0) return { score: evaluate(boardState, sHand, gHand) };
+
+  const hash = hashBoard(boardState, sHand, gHand, maximizing);
+
+  // Transposition table probe
+  const ttHit = ttProbe(hash, depth, alpha, beta);
+  if (ttHit && depth < evalOwner) { // Don't use TT cut at root
+    return ttHit;
+  }
+  const ttBestMove = ttHit ? ttHit.move : (ttTable[hash & TT_MASK]?.hash === hash ? ttTable[hash & TT_MASK].move : null);
 
   let moves = getAllLegalMoves(boardState, owner, sHand, gHand);
   if (moves.length === 0) {
     if (isInCheck(boardState, owner)) {
-      return { score: maximizing ? -99999 + (MAX_DEPTH-depth)*100 : 99999 - (MAX_DEPTH-depth)*100 };
+      const mateScore = maximizing ? -99999 + (MAX_DEPTH - depth) * 100 : 99999 - (MAX_DEPTH - depth) * 100;
+      return { score: mateScore };
     }
     return { score: 0 };
   }
 
-  moves.sort((a, b) => {
-    let sa = 0, sb = 0;
-    if (a.type === 'move' && boardState[a.tr][a.tc] !== EMPTY) sa += 1000 + (PIECE_VALUES[absPiece(boardState[a.tr][a.tc])] || 0);
-    if (b.type === 'move' && boardState[b.tr][b.tc] !== EMPTY) sb += 1000 + (PIECE_VALUES[absPiece(boardState[b.tr][b.tc])] || 0);
-    if (a.promote) sa += 500;
-    if (b.promote) sb += 500;
-    if (a.type === 'move') sa += 100;
-    if (b.type === 'move') sb += 100;
-    return sb - sa;
-  });
+  // Move ordering with TT best move priority
+  moves.sort((a, b) => scoreMoveForOrdering(b, boardState, ttBestMove) - scoreMoveForOrdering(a, boardState, ttBestMove));
 
+  // Late move pruning: limit drops at shallow depths
   if (depth <= 2) {
-    const boardMoves = moves.filter(m => m.type === 'move');
+    const boardMoves = moves.filter(m => m.type !== 'drop');
     const dropMoves = moves.filter(m => m.type === 'drop').slice(0, 8);
     moves = boardMoves.concat(dropMoves);
   }
 
   let bestMove = moves[0];
+  let bestScore;
+  let ttFlag;
+
   if (maximizing) {
-    let maxScore = -Infinity;
+    bestScore = -Infinity;
+    ttFlag = TT_ALPHA;
     for (const move of moves) {
       const result = applyMove(boardState, move, sHand, gHand, owner);
-      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth-1, alpha, beta, false, evalOwner);
-      if (score > maxScore) { maxScore = score; bestMove = move; }
-      alpha = Math.max(alpha, score);
-      if (beta <= alpha) break;
+      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth - 1, alpha, beta, false, evalOwner);
+      if (score > bestScore) { bestScore = score; bestMove = move; }
+      if (score > alpha) { alpha = score; ttFlag = TT_EXACT; }
+      if (beta <= alpha) { ttFlag = TT_BETA; break; }
     }
-    return { score: maxScore, move: bestMove };
   } else {
-    let minScore = Infinity;
+    bestScore = Infinity;
+    ttFlag = TT_BETA;
     for (const move of moves) {
       const result = applyMove(boardState, move, sHand, gHand, owner);
-      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth-1, alpha, beta, true, evalOwner);
-      if (score < minScore) { minScore = score; bestMove = move; }
-      beta = Math.min(beta, score);
-      if (beta <= alpha) break;
+      const { score } = minimax(result.board, result.senteHand, result.goteHand, depth - 1, alpha, beta, true, evalOwner);
+      if (score < bestScore) { bestScore = score; bestMove = move; }
+      if (score < beta) { beta = score; ttFlag = TT_EXACT; }
+      if (beta <= alpha) { ttFlag = TT_ALPHA; break; }
     }
-    return { score: minScore, move: bestMove };
   }
+
+  ttStore(hash, depth, bestScore, ttFlag, bestMove);
+  return { score: bestScore, move: bestMove };
+}
+
+// --- Iterative Deepening ---
+function iterativeDeepening(boardState, sHand, gHand, maxDepth, maximizing, currentTurn) {
+  ttGeneration++;
+  let bestResult = { score: 0, move: null };
+  searchNodes = 0;
+  for (let d = 1; d <= maxDepth; d++) {
+    const result = minimax(boardState, sHand, gHand, d, -Infinity, Infinity, maximizing, d);
+    if (result.move) bestResult = result;
+    // Early exit on forced mate
+    if (Math.abs(result.score) > 90000) break;
+  }
+  return bestResult;
 }
 
 function aiMove() {
@@ -1000,7 +1092,7 @@ function aiMove() {
   // Delay to allow initial UI update before blocking minimax
   setTimeout(() => {
     const depth = currentTurn === SENTE ? senteAiDepth : goteAiDepth;
-    const result = minimax(board, senteHand, goteHand, depth, -Infinity, Infinity, maximizing, currentTurn);
+    const result = iterativeDeepening(board, senteHand, goteHand, depth, maximizing, currentTurn);
     clearInterval(thinkTimer);
     const thinkMs = Date.now() - thinkStart;
     // Update display with final elapsed time before committing
