@@ -843,7 +843,7 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
         }
       }
     }
-    // 中絶（妊→金に戻す）
+    // 妊解除（妊→金に戻す）
     for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
       if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === NIN) {
         moves.push({ type:'abort_nin', tr:r, tc:c });
@@ -885,7 +885,7 @@ function applyMove(boardState, move, sHand, gHand, owner) {
     // 金→妊（1手消費、駒は移動しない）
     nb[move.tr][move.tc] = owner * NIN;
   } else if (move.type === 'abort_nin') {
-    // 中絶: 妊→金（1手消費）
+    // 妊解除: 妊→金（1手消費）
     nb[move.tr][move.tc] = owner * KI;
   } else {
     nb[move.tr][move.tc] = owner * move.piece;
@@ -1547,7 +1547,7 @@ function executePromoteToNin(r, c) {
   checkAfterMove();
 }
 
-// 王家将棋: 中絶ダイアログ
+// 王家将棋: 妊解除ダイアログ
 function showAbortDialog(r, c) {
   const modal = document.getElementById('modal-overlay');
   const text = document.getElementById('modal-text');
@@ -1565,7 +1565,7 @@ function showAbortDialog(r, c) {
   modal.classList.add('show');
 }
 
-// 王家将棋: 中絶実行（1手消費、妊→金）
+// 王家将棋: 妊解除実行（1手消費、妊→金）
 function executeAbort(r, c) {
   const currentTurn = turn;
   stopHumanThinkTimer();
@@ -1669,7 +1669,7 @@ function onCellClick(r, c) {
         return;
       }
     }
-    // 王家将棋: 妊クリック → 中絶ダイアログ
+    // 王家将棋: 妊クリック → 妊解除ダイアログ
     if (absPiece(board[r][c]) === NIN && gameVariant === 'ouke') {
       showAbortDialog(r, c);
       return;
