@@ -154,159 +154,23 @@ loadWasmEngine();
 // MCTS Web Worker pool for parallel search
 let mctsWorkerPool = [];
 let mctsWorkersReady = false;
-async function initMctsWorkers() {
+function initMctsWorkers() {
   const numWorkers = Math.min(navigator.hardwareConcurrency || 1, 8);
-  console.log('[MCTS-Worker] init start, cores=' + numWorkers + ', protocol=' + location.protocol);
   if (numWorkers < 1) return;
-
-  // Method 1: Module workers (works on http:// / https://)
-  if (location.protocol !== 'file:') {
-    try {
-      for (let i = 0; i < numWorkers; i++) {
-        mctsWorkerPool.push(new Worker('./shogi-worker.js', { type: 'module' }));
-      }
-      mctsWorkersReady = true;
-      console.log('[MCTS-Worker] ' + numWorkers + ' module workers created');
-      return;
-    } catch(e) {
-      console.warn('[MCTS-Worker] Module workers failed:', e);
-      mctsWorkerPool = [];
-    }
-  }
-
-  // Method 2: Blob URL workers (file:// fallback)
-  console.log('[MCTS-Worker] Trying blob worker fallback...');
-
-  // Step 1: Load glue code and WASM binary
-  let glueCode, wasmBytes;
   try {
-    const [glueResp, wasmResp] = await Promise.all([
-      fetch('./shogi-engine/pkg/shogi_engine.js'),
-      fetch('./shogi-engine/pkg/shogi_engine_bg.wasm')
-    ]);
-    glueCode = await glueResp.text();
-    wasmBytes = await wasmResp.arrayBuffer();
-    console.log('[MCTS-Worker] Fetched glue(' + glueCode.length + ' chars) + wasm(' + wasmBytes.byteLength + ' bytes)');
+    for (let i = 0; i < numWorkers; i++) {
+      mctsWorkerPool.push(new Worker('./shogi-worker.js', { type: 'module' }));
+    }
+    mctsWorkersReady = true;
+    console.log('MCTS worker pool: ' + numWorkers + ' workers');
   } catch(e) {
-    console.warn('[MCTS-Worker] fetch failed, trying XHR:', e);
-    try {
-      glueCode = await new Promise((res, rej) => {
-        const x = new XMLHttpRequest(); x.open('GET', './shogi-engine/pkg/shogi_engine.js');
-        x.onload = () => res(x.responseText); x.onerror = rej; x.send();
-      });
-      wasmBytes = await new Promise((res, rej) => {
-        const x = new XMLHttpRequest(); x.open('GET', './shogi-engine/pkg/shogi_engine_bg.wasm');
-        x.responseType = 'arraybuffer'; x.onload = () => res(x.response); x.onerror = rej; x.send();
-      });
-      console.log('[MCTS-Worker] XHR OK: glue(' + glueCode.length + ') wasm(' + wasmBytes.byteLength + ')');
-    } catch(e2) {
-      console.error('[MCTS-Worker] XHR also failed:', e2);
-      return;
-    }
+    console.warn('Web Worker init failed:', e);
+    mctsWorkerPool = [];
+    mctsWorkersReady = false;
   }
-
-  // Step 2: Compile WASM
-  let wasmModule;
-  try {
-    wasmModule = await WebAssembly.compile(wasmBytes);
-    console.log('[MCTS-Worker] WASM compiled');
-  } catch(e) {
-    console.error('[MCTS-Worker] WASM compile failed:', e);
-    return;
-  }
-
-  // Step 3: Create Blob URL worker
-  const modifiedGlue = glueCode
-    .replace(/^export function /gm, 'function ')
-    .replace(/^export \{[^}]*\};?\s*$/gm, '')
-    .replace(/import\.meta\.url/g, "'unused'");
-
-  const workerHandler = `
-let _workerReady = false;
-self.onmessage = function(e) {
-  if (e.data.type === "init") {
-    try {
-      initSync(e.data.wasmModule);
-      _workerReady = true;
-      self.postMessage({ type: "ready" });
-    } catch(err) {
-      self.postMessage({ type: "error", msg: err.message });
-    }
-    return;
-  }
-  if (!_workerReady) return;
-  var d = e.data;
-  var stats = wasm_mcts_search_stats(
-    new Int8Array(d.board), new Uint8Array(d.sHand), new Uint8Array(d.gHand),
-    d.simulations, d.maximizing, d.timeLimit, d.variantCode
-  );
-  var result = [];
-  for (var i = 0; i < stats.length; i++) {
-    var s = stats[i];
-    result.push({ type: s.type, fr: s.fr, fc: s.fc, tr: s.tr, tc: s.tc,
-      promote: s.promote, piece: s.piece, visits: s.visits, value: s.value });
-  }
-  self.postMessage({ requestId: d.requestId, stats: result });
-};
-`;
-
-  let blobUrl;
-  try {
-    const blob = new Blob([modifiedGlue + workerHandler], { type: 'application/javascript' });
-    blobUrl = URL.createObjectURL(blob);
-    console.log('[MCTS-Worker] Blob URL created');
-  } catch(e) {
-    console.error('[MCTS-Worker] Blob creation failed:', e);
-    return;
-  }
-
-  // Step 4: Create workers and wait for ready
-  const readyPromises = [];
-  for (let i = 0; i < numWorkers; i++) {
-    try {
-      const worker = new Worker(blobUrl);
-      mctsWorkerPool.push(worker);
-      readyPromises.push(new Promise((resolve) => {
-        const timeout = setTimeout(() => { console.warn('[MCTS-Worker] Worker ' + i + ' timed out'); resolve(false); }, 5000);
-        const handler = function(ev) {
-          if (ev.data.type === 'ready') {
-            clearTimeout(timeout);
-            worker.removeEventListener('message', handler);
-            console.log('[MCTS-Worker] Worker ' + i + ' ready');
-            resolve(true);
-          } else if (ev.data.type === 'error') {
-            clearTimeout(timeout);
-            worker.removeEventListener('message', handler);
-            console.error('[MCTS-Worker] Worker ' + i + ' init error:', ev.data.msg);
-            resolve(false);
-          }
-        };
-        worker.addEventListener('message', handler);
-        worker.onerror = (err) => { clearTimeout(timeout); console.error('[MCTS-Worker] Worker ' + i + ' onerror:', err); resolve(false); };
-      }));
-      worker.postMessage({ type: 'init', wasmModule });
-    } catch(e) {
-      console.error('[MCTS-Worker] Worker ' + i + ' creation failed:', e);
-      readyPromises.push(Promise.resolve(false));
-    }
-  }
-
-  const results = await Promise.all(readyPromises);
-  const readyWorkers = [];
-  for (let i = 0; i < mctsWorkerPool.length; i++) {
-    if (results[i]) {
-      readyWorkers.push(mctsWorkerPool[i]);
-    } else {
-      try { mctsWorkerPool[i].terminate(); } catch(e) {}
-    }
-  }
-  mctsWorkerPool = readyWorkers;
-  mctsWorkersReady = readyWorkers.length > 0;
-  URL.revokeObjectURL(blobUrl);
-  console.log('[MCTS-Worker] Final: ' + readyWorkers.length + '/' + numWorkers + ' workers ready');
-  if (mctsWorkersReady && typeof render === 'function') render();
 }
-initMctsWorkers().catch(function(e) { console.error('[MCTS-Worker] Unhandled error:', e); });
+// Workers require HTTP server (file:// blocks CORS). Use start.bat to launch.
+if (location.protocol !== 'file:') initMctsWorkers();
 
 // Run parallel MCTS across workers, aggregate root-child visit counts
 let mctsRequestCounter = 0;
