@@ -131,7 +131,28 @@ fn backpropagate(root: &mut MctsNode, path: &[usize], value: f64) {
     }
 }
 
-/// Evaluate a leaf/terminal node
+/// Maximum number of moves to evaluate at each simulation step
+const SIM_MOVE_LIMIT: usize = 12;
+/// Number of plies for guided simulation playout
+const SIM_DEPTH: u8 = 4;
+
+/// Quick score for prioritizing which moves to evaluate during simulation
+/// (captures and promotions first)
+fn sim_move_priority(m: &ShogiMove, board: &Board) -> i32 {
+    let mut s: i32 = 0;
+    if m.move_type == MOVE_TYPE_MOVE {
+        let target = board_get(board, m.tr as usize, m.tc as usize);
+        if target != EMPTY {
+            s += 1000 + piece_value(abs_piece(target));
+        }
+    }
+    if m.promote { s += 500; }
+    if m.move_type == MOVE_TYPE_PROMOTE_NIN { s += 300; }
+    s
+}
+
+/// Guided simulation: play SIM_DEPTH plies greedily using evaluation function,
+/// then return sigmoid-normalized score of the final position.
 fn simulate_value(node: &MctsNode, variant: GameVariant) -> f64 {
     if node.is_terminal() {
         let owner = if node.maximizing { SENTE } else { GOTE };
@@ -141,9 +162,84 @@ fn simulate_value(node: &MctsNode, variant: GameVariant) -> f64 {
             0.5
         }
     } else {
-        let score = evaluate(&node.board, &node.s_hand, &node.g_hand, variant);
+        // Guided playout: greedily pick best-evaluated moves for a few plies
+        let mut cur_board = node.board;
+        let mut cur_sh = node.s_hand;
+        let mut cur_gh = node.g_hand;
+        let mut cur_maximizing = node.maximizing;
+
+        for _ in 0..SIM_DEPTH {
+            let owner = if cur_maximizing { SENTE } else { GOTE };
+            let moves = get_all_legal_moves(&cur_board, owner, &cur_sh, &cur_gh, variant);
+            if moves.is_empty() {
+                // Terminal: checkmate or stalemate
+                if is_in_check(&cur_board, owner) {
+                    return if cur_maximizing { 0.0 } else { 1.0 };
+                }
+                return 0.5;
+            }
+
+            // Select top-K moves by priority, then pick the one with best eval
+            let best_move = if moves.len() <= SIM_MOVE_LIMIT {
+                // Few enough moves: evaluate all
+                pick_best_move(&moves, &cur_board, &cur_sh, &cur_gh, owner, cur_maximizing, variant)
+            } else {
+                // Too many moves: pre-filter to top SIM_MOVE_LIMIT by capture/promotion priority
+                let mut scored: Vec<(i32, usize)> = moves.iter().enumerate()
+                    .map(|(i, m)| (sim_move_priority(m, &cur_board), i))
+                    .collect();
+                scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+                scored.truncate(SIM_MOVE_LIMIT);
+                let subset: Vec<&ShogiMove> = scored.iter().map(|&(_, i)| &moves[i]).collect();
+                pick_best_move_subset(&subset, &cur_board, &cur_sh, &cur_gh, owner, cur_maximizing, variant)
+            };
+
+            let (nb, nsh, ngh) = apply_move(&cur_board, &best_move, &cur_sh, &cur_gh, owner, variant);
+            cur_board = nb;
+            cur_sh = nsh;
+            cur_gh = ngh;
+            cur_maximizing = !cur_maximizing;
+        }
+
+        let score = evaluate(&cur_board, &cur_sh, &cur_gh, variant);
         normalize_score(score)
     }
+}
+
+/// Pick the best move from all moves by evaluation
+fn pick_best_move(
+    moves: &[ShogiMove], board: &Board, s_hand: &Hand, g_hand: &Hand,
+    owner: i8, maximizing: bool, variant: GameVariant,
+) -> ShogiMove {
+    let mut best_score = if maximizing { i32::MIN } else { i32::MAX };
+    let mut best_idx = 0;
+    for (i, m) in moves.iter().enumerate() {
+        let (nb, nsh, ngh) = apply_move(board, m, s_hand, g_hand, owner, variant);
+        let score = evaluate(&nb, &nsh, &ngh, variant);
+        if (maximizing && score > best_score) || (!maximizing && score < best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+    moves[best_idx]
+}
+
+/// Pick the best move from a subset of move references by evaluation
+fn pick_best_move_subset(
+    moves: &[&ShogiMove], board: &Board, s_hand: &Hand, g_hand: &Hand,
+    owner: i8, maximizing: bool, variant: GameVariant,
+) -> ShogiMove {
+    let mut best_score = if maximizing { i32::MIN } else { i32::MAX };
+    let mut best_idx = 0;
+    for (i, m) in moves.iter().enumerate() {
+        let (nb, nsh, ngh) = apply_move(board, m, s_hand, g_hand, owner, variant);
+        let score = evaluate(&nb, &nsh, &ngh, variant);
+        if (maximizing && score > best_score) || (!maximizing && score < best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+    *moves[best_idx]
 }
 
 /// Core MCTS loop — runs simulations on root node, returns the root
