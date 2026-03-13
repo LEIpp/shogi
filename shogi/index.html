@@ -913,6 +913,16 @@ function evaluate(boardState, sHand, gHand) {
       if (owner === SENTE) val += (8 - r) * 15;
       else val += r * 15;
     }
+    // 妊の前マスが味方駒で塞がれている → 死産リスク大ペナルティ
+    if (a === NIN && gameVariant === 'ouke') {
+      const dir = owner === SENTE ? -1 : 1;
+      const frontR = r + dir;
+      if (frontR < 0 || frontR >= BOARD_ROWS) {
+        val -= 200; // 盤端で確定死産
+      } else if (getPieceOwner(boardState[frontR][c]) === owner) {
+        val -= 150; // 味方駒が塞いでいる
+      }
+    }
     if (a === OU) {
       const centerDist = Math.abs(c - Math.floor(BOARD_COLS / 2));
       val += centerDist * 5;
