@@ -136,6 +136,37 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
 </div>
 
 <script>
+// WASM engine (loaded asynchronously)
+let wasmEngine = null;
+async function loadWasmEngine() {
+  try {
+    const mod = await import('./shogi-engine/pkg/shogi_engine.js');
+    await mod.default();
+    mod.wasm_init();
+    wasmEngine = mod;
+    console.log('WASM shogi engine loaded successfully');
+  } catch(e) {
+    console.warn('WASM engine load failed, using JS fallback:', e);
+  }
+}
+loadWasmEngine();
+
+// WASM helper: convert board[9][9] to flat Int8Array(81)
+function boardToFlat(b) {
+  const flat = new Int8Array(81);
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < BOARD_COLS; c++)
+      flat[r * 9 + c] = b[r][c];
+  return flat;
+}
+
+// WASM helper: convert hand object {pieceType: count} to Uint8Array(8)
+function handToArray(hand) {
+  // Order: [HI, KA, KI, GI, KE, KY, FU, HM]
+  const order = [HI, KA, KI, GI, KE, KY, FU, HM];
+  return new Uint8Array(order.map(pt => hand[pt] || 0));
+}
+
 // Piece constants
 const EMPTY = 0;
 const FU=1, KY=2, KE=3, GI=4, KI=5, KA=6, HI=7, OU=8;
@@ -318,6 +349,7 @@ function resetGame() {
   undoneHistory = [];
   ninPregnancy = {};
   ttClear();
+  if (wasmEngine) wasmEngine.wasm_tt_clear();
   senteThinkTotal = 0; goteThinkTotal = 0;
   senteThinkCurrent = 0; goteThinkCurrent = 0;
   render();
@@ -1131,7 +1163,33 @@ function aiMove() {
   setTimeout(() => {
     const levelIdx = currentTurn === SENTE ? senteAiLevel : goteAiLevel;
     const level = AI_LEVELS[levelIdx];
-    const result = iterativeDeepening(board, senteHand, goteHand, level.depth, maximizing, currentTurn, level.timeLimit);
+    let result;
+    if (wasmEngine) {
+      // Use Rust+WASM engine
+      const flatBoard = boardToFlat(board);
+      const sHand = handToArray(senteHand);
+      const gHand = handToArray(goteHand);
+      const variantCode = gameVariant === 'ouke' ? 1 : 0;
+      const wasmResult = wasmEngine.wasm_search(flatBoard, sHand, gHand, level.depth, maximizing, level.timeLimit, variantCode);
+      if (wasmResult.found) {
+        const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
+        result = {
+          score: wasmResult.score,
+          move: {
+            type: moveTypes[wasmResult.type] || 'move',
+            fr: wasmResult.fr, fc: wasmResult.fc,
+            tr: wasmResult.tr, tc: wasmResult.tc,
+            promote: wasmResult.promote,
+            piece: wasmResult.piece
+          }
+        };
+      } else {
+        result = { score: wasmResult.score, move: null };
+      }
+    } else {
+      // Fallback to JS engine
+      result = iterativeDeepening(board, senteHand, goteHand, level.depth, maximizing, currentTurn, level.timeLimit);
+    }
     clearInterval(thinkTimer);
     const thinkMs = Date.now() - thinkStart;
     // Update display with final elapsed time before committing
