@@ -831,8 +831,8 @@ function getAllLegalMoves(boardState, owner, sHand, gHand) {
       }
     }
   }
-  // 王家将棋: 金→妊昇格（子作成は自動出産で処理）
-  if (gameVariant === 'ouke') {
+  // 王家将棋: 金→妊昇格・妊解除（王手中は不可）
+  if (gameVariant === 'ouke' && !isInCheck(boardState, owner)) {
     for (let r=0; r<BOARD_ROWS; r++) for (let c=0; c<BOARD_COLS; c++) {
       if (getPieceOwner(boardState[r][c]) === owner && absPiece(boardState[r][c]) === KI) {
         if (canPromoteToNin(boardState, r, c, owner)) {
@@ -1734,16 +1734,20 @@ function onCellClick(r, c) {
 
   // Select own piece
   if (getPieceOwner(board[r][c]) === currentTurn) {
-    // 王家将棋: 金クリック時に妊昇格ダイアログ
-    if (absPiece(board[r][c]) === KI && gameVariant === 'ouke') {
+    // 王家将棋: 金クリック時に妊昇格ダイアログ（王手中は不可）
+    if (absPiece(board[r][c]) === KI && gameVariant === 'ouke' && !isInCheck(board, currentTurn)) {
       if (canPromoteToNin(board, r, c, currentTurn)) {
         showPromoteToNinDialog(r, c);
         return;
       }
     }
-    // 王家将棋: 妊クリック → 妊解除ダイアログ
+    // 王家将棋: 妊クリック → 妊解除ダイアログ（王手中は不可）
     if (absPiece(board[r][c]) === NIN && gameVariant === 'ouke') {
-      showAbortDialog(r, c);
+      if (!isInCheck(board, currentTurn)) {
+        showAbortDialog(r, c);
+        return;
+      }
+      // 王手中は妊を選択不可（動けないため）
       return;
     }
     selected = [r, c]; selectedHand = null; render();
