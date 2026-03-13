@@ -156,7 +156,7 @@ const HAND_NAMES = { [FU]:'歩',[KY]:'香',[KE]:'桂',[GI]:'銀',[KI]:'金',[KA]
 const PIECE_VALUES = {
   [FU]:100,[KY]:300,[KE]:350,[GI]:450,[KI]:500,[KA]:650,[HI]:700,[OU]:10000,
   [TO]:420,[NY]:400,[NK]:410,[NG]:460,[UM]:850,[RY]:950,
-  [HM]:600,[KO]:500,[WK]:800,[NIN]:550
+  [HM]:600,[KO]:400,[WK]:1200,[NIN]:650
 };
 
 const SENTE = 1, GOTE = -1;
@@ -908,6 +908,11 @@ function evaluate(boardState, sHand, gHand) {
       if (owner === SENTE) val += (6 - r) * 2;
       else val += (r - 2) * 2;
     }
+    // 子は敵陣に近いほど高評価（成って若になるインセンティブ）
+    if (a === KO) {
+      if (owner === SENTE) val += (8 - r) * 15;
+      else val += r * 15;
+    }
     if (a === OU) {
       const centerDist = Math.abs(c - Math.floor(BOARD_COLS / 2));
       val += centerDist * 5;
@@ -981,7 +986,7 @@ function scoreMoveForOrdering(m, boardState, ttBestMove) {
   }
   if (m.promote) s += 5000;
   if (m.type === 'move') s += 100;
-  if (m.type === 'promote_nin') s += 200;
+  if (m.type === 'promote_nin') s += 500;
   return s;
 }
 
