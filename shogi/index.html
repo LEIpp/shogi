@@ -122,9 +122,10 @@ h1 { font-size: 24px; color: #e8d4a0; margin-bottom: 5px; }
       </div>
     </div>
     <div id="controls">
-      <button onclick="resetGame()">最初から</button>
       <button id="btn-undo" onclick="undoMove()">◀ 待った</button>
       <button id="btn-forward" onclick="forwardMove()" style="display:none">1手進む ▶</button>
+      <div style="height: 20px"></div>
+      <button onclick="confirmResetGame()">最初から</button>
     </div>
   </div>
 </div>
@@ -433,6 +434,13 @@ function initBoard() {
   board[8][0]=KY; board[8][1]=KE; board[8][2]=GI; board[8][3]=KI;
   board[8][4]=OU; board[8][5]=KI; board[8][6]=GI; board[8][7]=KE; board[8][8]=KY;
   // 王家将棋: 通常将棋と同じ配置（金が王の左右に1枚ずつ）
+}
+
+function confirmResetGame() {
+  if (history.length > 0 && !gameOver) {
+    if (!confirm('対局を中断して最初からやり直しますか？')) return;
+  }
+  resetGame();
 }
 
 function resetGame() {
