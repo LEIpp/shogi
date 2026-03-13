@@ -341,7 +341,7 @@ function showPlayerSelectDialog() {
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します（1手消費）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると動けなくなり、カウンター8から自分・相手の両手番でカウントダウンし、0になると自動的に出産します（自分の手番での出産は1手消費）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentLevel) {
@@ -1278,14 +1278,59 @@ function processAutoBirth(player) {
   return true;
 }
 
-// 王家将棋: 妊娠カウンターを進める（ターン開始時）
-function advancePregnancy(player) {
+// 王家将棋: 相手側の自動出産（ターン消費なし）
+function processAutoBirthNoTurn(player) {
+  if (gameVariant !== 'ouke') return false;
+
+  const birthInfo = findBirthReadyNin(player);
+  if (!birthInfo) return false;
+
+  const [ninR, ninC, ninKey] = birthInfo;
+  const dir = player === SENTE ? -1 : 1;
+  const targetR = ninR + dir;
+  const targetC = ninC;
+  const myHand = player === SENTE ? senteHand : goteHand;
+
+  pushHistory();
+
+  if (targetR < 0 || targetR >= BOARD_ROWS) {
+    board[ninR][ninC] = player * KI;
+    delete ninPregnancy[ninKey];
+    lastMove = { tr: ninR, tc: ninC };
+    updateStatus(turnName(player) + 'の妊が出産...盤外のため死産。金に戻りました。');
+  } else if (getPieceOwner(board[targetR][targetC]) === player) {
+    board[ninR][ninC] = player * KI;
+    delete ninPregnancy[ninKey];
+    lastMove = { tr: ninR, tc: ninC };
+    updateStatus(turnName(player) + 'の妊が出産...味方駒が邪魔で死産。金に戻りました。');
+  } else {
+    const captured = board[targetR][targetC];
+    if (captured !== EMPTY) {
+      addCaptureToHand(captured, myHand);
+    }
+    board[ninR][ninC] = player * HM;
+    board[targetR][targetC] = player * KO;
+    delete ninPregnancy[ninKey];
+    lastMove = { fr: ninR, fc: ninC, tr: targetR, tc: targetC };
+    if (captured !== EMPTY) {
+      updateStatus(turnName(player) + 'の妊が出産！敵駒を取って子が生まれ、妃になりました。');
+    } else {
+      updateStatus(turnName(player) + 'の妊が出産！子が生まれ、妃になりました。');
+    }
+  }
+
+  // 相手の出産はターン消費しない
+  selected = null; selectedHand = null;
+  render();
+  return true;
+}
+
+// 王家将棋: 妊娠カウンターを進める（全妊対象）
+function advancePregnancy() {
   if (gameVariant !== 'ouke') return;
   for (const key of Object.keys(ninPregnancy)) {
     if (ninPregnancy[key] <= 0) continue;
     const [r, c] = key.split(',').map(Number);
-    // このプレイヤーの妊か確認
-    if (getPieceOwner(board[r][c]) !== player) continue;
     if (absPiece(board[r][c]) !== NIN) {
       delete ninPregnancy[key]; // 妊が取られた
       continue;
@@ -1298,21 +1343,29 @@ function advancePregnancy(player) {
 function checkAfterMove() {
   const nextPlayer = turn;
 
-  // 王家将棋: 妊娠カウンター処理
+  // 王家将棋: 妊娠カウンター処理（両プレイヤーの妊をカウントダウン）
   if (gameVariant === 'ouke') {
-    // 自動出産チェック（カウンター==0の妊があれば出産実行）
+    // 自動出産チェック（手番側の妊が出産予定なら実行、1手消費）
     if (findBirthReadyNin(nextPlayer)) {
-      // 少し遅延して出産アニメーション
       const birthDelay = isCurrentAI() ? 500 : 200;
       setTimeout(() => {
         processAutoBirth(nextPlayer);
-        // 出産後、次のターンを通常処理
         checkAfterMove();
       }, birthDelay);
       return;
     }
-    // カウンター減算
-    advancePregnancy(nextPlayer);
+    // 相手側の妊も出産チェック（相手の出産はターン消費しない）
+    const opponent = -nextPlayer;
+    if (findBirthReadyNin(opponent)) {
+      const birthDelay = isCurrentAI() ? 500 : 200;
+      setTimeout(() => {
+        processAutoBirthNoTurn(opponent);
+        checkAfterMove();
+      }, birthDelay);
+      return;
+    }
+    // カウンター減算（全ての妊）
+    advancePregnancy();
   }
 
   const nextMoves = getAllLegalMoves(board, nextPlayer, senteHand, goteHand);
