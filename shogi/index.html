@@ -341,7 +341,7 @@ function showPlayerSelectDialog() {
 
   const VARIANT_DESC = {
     normal: '通常の将棋です。',
-    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します（ターン消費なし）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
+    ouke: '<b>王家将棋</b> - 初期配置は通常将棋と同じ。<br>金が王に隣接している時、1手を使って金を「妊」に成らせることができます。妊はいつでも1手を使って金に戻せます。<br>妊になると8手の間動けなくなり、9手目に自動的に出産します（1手消費）。<br>出産時: 前に子が生まれ、妊は妃に。前に味方駒→死産（金に戻る）。前に敵駒→子が取って出産。<br>妃は王と同じ8方向に動けます。妊・妃が取られると手駒は金になります。<br>子は8方向に最大3マス移動可能（飛び越え不可）。敵陣で成ると「若」になり、角+飛車の動きができます。<br>子・若を取っても持ち駒には使えません。'
   };
 
   function aiLevelButtons(id, currentLevel) {
@@ -1263,7 +1263,7 @@ function processAutoBirth(player) {
     board[ninR][ninC] = player * HM; // 妊→妃
     board[targetR][targetC] = player * KO; // 子を配置
     delete ninPregnancy[ninKey];
-    lastMove = { tr: targetR, tc: targetC };
+    lastMove = { fr: ninR, fc: ninC, tr: targetR, tc: targetC };
     if (captured !== EMPTY) {
       updateStatus(turnName(player) + 'の妊が出産！敵駒を取って子が生まれ、妃になりました。');
     } else {
@@ -1271,7 +1271,8 @@ function processAutoBirth(player) {
     }
   }
 
-  // 出産は自動で行われるためターンを消費しない
+  // 出産は1手消費
+  turn = -player;
   selected = null; selectedHand = null;
   render();
   return true;
