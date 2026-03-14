@@ -173,41 +173,65 @@ function initMctsWorkers() {
 // Workers require HTTP server (file:// blocks CORS). Use start.bat to launch.
 if (location.protocol !== 'file:') initMctsWorkers();
 
-// Run parallel MCTS across workers, aggregate root-child visit counts
+// === MCTS incremental batch system with pondering ===
 let mctsRequestCounter = 0;
-function runMctsParallel(flatBoard, sHand, gHand, simulations, maximizing, timeLimit, variantCode) {
-  return new Promise((resolve) => {
-    const numWorkers = mctsWorkerPool.length;
-    const simsPerWorker = Math.ceil(simulations / numWorkers);
-    const requestId = ++mctsRequestCounter;
-    const allStats = [];
-    let completed = 0;
+let ponderingActive = false;
+const MCTS_BATCH_SIZE = 200; // simulations per batch per worker
 
+// Send a command to all workers and wait for all responses
+function mctsWorkerBroadcast(msg) {
+  return new Promise((resolve) => {
+    const requestId = ++mctsRequestCounter;
+    const results = [];
+    let completed = 0;
+    const numWorkers = mctsWorkerPool.length;
     for (let i = 0; i < numWorkers; i++) {
       const worker = mctsWorkerPool[i];
       const handler = function(e) {
         if (e.data.requestId !== requestId) return;
         worker.removeEventListener('message', handler);
-        allStats.push(e.data.stats);
-        completed++;
-        if (completed === numWorkers) {
-          resolve(aggregateMctsStats(allStats));
-        }
+        results.push(e.data);
+        if (++completed === numWorkers) resolve(results);
       };
       worker.addEventListener('message', handler);
-      worker.postMessage({
-        board: Array.from(flatBoard),
-        sHand: Array.from(sHand),
-        gHand: Array.from(gHand),
-        simulations: simsPerWorker,
-        maximizing, timeLimit, variantCode, requestId
-      });
+      worker.postMessage({ ...msg, requestId });
     }
   });
 }
 
-// Aggregate per-move visit counts from multiple workers
-function aggregateMctsStats(allStats) {
+// Initialize MCTS tree on all workers
+async function mctsInitAllTrees(flatBoard, sHand, gHand, maximizing, variantCode) {
+  await mctsWorkerBroadcast({
+    type: 'mcts_init',
+    board: Array.from(flatBoard),
+    sHand: Array.from(sHand),
+    gHand: Array.from(gHand),
+    maximizing, variantCode
+  });
+}
+
+// Run one batch of simulations on all workers, returns aggregated stats
+async function mctsRunBatchAll() {
+  const results = await mctsWorkerBroadcast({
+    type: 'mcts_batch', count: MCTS_BATCH_SIZE
+  });
+  return results.map(r => r.stats);
+}
+
+// Apply a move to all workers' trees (for pondering tree reuse)
+async function mctsApplyMoveAll(moveType, fr, fc, tr, tc, promote, piece) {
+  await mctsWorkerBroadcast({
+    type: 'mcts_apply_move', moveType, fr, fc, tr, tc, promote, piece
+  });
+}
+
+// Clear all workers' trees
+async function mctsClearAll() {
+  await mctsWorkerBroadcast({ type: 'mcts_clear' });
+}
+
+// Aggregate stats from all workers into merged map
+function mergeWorkerStats(allStats) {
   const merged = new Map();
   for (const workerStats of allStats) {
     for (const s of workerStats) {
@@ -221,7 +245,11 @@ function aggregateMctsStats(allStats) {
       }
     }
   }
-  // Pick move with most total visits
+  return merged;
+}
+
+// Pick best move from merged stats
+function pickBestFromStats(merged) {
   let best = null;
   for (const stat of merged.values()) {
     if (!best || stat.visits > best.visits) best = stat;
@@ -229,16 +257,96 @@ function aggregateMctsStats(allStats) {
   if (!best) return { found: false, score: 0 };
   const moveTypes = ['move', 'drop', 'promote_nin', 'abort_nin'];
   return {
-    found: true,
-    score: 0,
+    found: true, score: 0,
     move: {
       type: moveTypes[best.type] || 'move',
       fr: best.fr, fc: best.fc,
       tr: best.tr, tc: best.tc,
-      promote: best.promote,
-      piece: best.piece
+      promote: best.promote, piece: best.piece
     }
   };
+}
+
+// Run MCTS with dynamic time allocation and early termination
+async function runMctsParallel(flatBoard, sHand, gHand, simulations, maximizing, timeLimit, variantCode) {
+  // Initialize trees (pondering may have warmed them already)
+  if (!ponderingActive) {
+    await mctsInitAllTrees(flatBoard, sHand, gHand, maximizing, variantCode);
+  }
+  ponderingActive = false;
+
+  const startTime = Date.now();
+  let effectiveTimeLimit = timeLimit;
+  let merged;
+
+  while (true) {
+    const allStats = await mctsRunBatchAll();
+    merged = mergeWorkerStats(allStats);
+
+    const elapsed = Date.now() - startTime;
+    const sorted = [...merged.values()].sort((a, b) => b.visits - a.visits);
+
+    if (sorted.length >= 2) {
+      // Early Termination: top move has 2x visits of 2nd place
+      // (only after at least 20% of time has passed)
+      if (sorted[0].visits > sorted[1].visits * 2 && elapsed > timeLimit * 0.2) {
+        break;
+      }
+
+      // Dynamic time allocation based on win-rate gap
+      const wr1 = sorted[0].visits > 0 ? sorted[0].value / sorted[0].visits : 0.5;
+      const wr2 = sorted[1].visits > 0 ? sorted[1].value / sorted[1].visits : 0.5;
+      const gap = Math.abs(wr1 - wr2);
+      if (gap > 0.15) {
+        effectiveTimeLimit = timeLimit * 0.6; // clear best → cut short
+      } else if (gap < 0.03) {
+        effectiveTimeLimit = timeLimit * 1.5; // close race → think longer
+      } else {
+        effectiveTimeLimit = timeLimit; // reset to normal
+      }
+    }
+
+    if (elapsed >= effectiveTimeLimit) break;
+
+    // Safety: if only 0-1 legal moves, stop immediately
+    if (sorted.length <= 1) break;
+  }
+
+  return pickBestFromStats(merged || new Map());
+}
+
+// === Pondering system ===
+// After AI moves, continue MCTS simulations during opponent's turn
+function startPondering(flatBoard, sHand, gHand, maximizing, variantCode) {
+  if (!mctsWorkersReady || mctsWorkerPool.length === 0) return;
+  ponderingActive = true;
+  // Init trees for the current position (opponent's turn)
+  mctsInitAllTrees(flatBoard, sHand, gHand, maximizing, variantCode).then(() => {
+    ponderLoop();
+  });
+}
+
+function ponderLoop() {
+  if (!ponderingActive) return;
+  // Run a batch, then schedule next
+  mctsRunBatchAll().then(() => {
+    if (ponderingActive) {
+      // Use setTimeout(0) to yield to other messages (human move, etc.)
+      setTimeout(ponderLoop, 0);
+    }
+  });
+}
+
+function stopPondering() {
+  ponderingActive = false;
+}
+
+// Apply move to pondering trees when a move is made (AI or human)
+async function ponderApplyMove(move) {
+  if (!mctsWorkersReady || mctsWorkerPool.length === 0) return;
+  const moveTypeMap = { 'move': 0, 'drop': 1, 'promote_nin': 2, 'abort_nin': 3 };
+  const mt = moveTypeMap[move.type] !== undefined ? moveTypeMap[move.type] : 0;
+  await mctsApplyMoveAll(mt, move.fr || 0, move.fc || 0, move.tr, move.tc, !!move.promote, move.piece || 0);
 }
 
 // Run parallel minimax (Lazy SMP) across workers
@@ -504,6 +612,7 @@ function confirmResetGame() {
 
 function resetGame() {
   if (aiTimerId) { clearTimeout(aiTimerId); aiTimerId = null; }
+  stopPondering();
   stopHumanThinkTimer();
   initBoard();
   senteHand = {}; goteHand = {};
@@ -723,8 +832,9 @@ function captureCurrentState() {
 function undoMove() {
   if (history.length === 0) return;
 
-  // Cancel pending AI move
+  // Cancel pending AI move and pondering
   if (aiTimerId) { clearTimeout(aiTimerId); aiTimerId = null; }
+  stopPondering();
 
   if (isBothAI()) {
     // AI vs AI: set pause flag immediately (even during animation)
@@ -1476,6 +1586,10 @@ function aiMove() {
     aiAnimTarget = { r: move.tr, c: move.tc };
     render();
 
+    // After AI moves, apply move to pondering trees and start pondering
+    // for opponent's turn (if opponent is not AI or if AI-vs-AI)
+    const aiMoveForPonder = move;
+
     // Check results after animation
     setTimeout(() => {
       aiAnimTarget = null;
@@ -1487,6 +1601,20 @@ function aiMove() {
         updateStatus('一時停止中 - ' + turnName(turn) + 'の番');
         updateControls();
         return;
+      }
+
+      // Start pondering after AI move if next player is human and MCTS AI exists
+      if (mctsWorkersReady && !gameOver && !isBothAI()) {
+        const nextMaximizing = (turn === SENTE);
+        const fb = boardToFlat(board);
+        const sh = handToArray(senteHand);
+        const gh = handToArray(goteHand);
+        const vc = gameVariant === 'ouke' ? 1 : 0;
+        // Check if MCTS is used for the AI side (the side that just moved)
+        const aiSideAlgo = currentTurn === SENTE ? senteAlgorithm : goteAlgorithm;
+        if (aiSideAlgo === 'mcts') {
+          startPondering(fb, sh, gh, nextMaximizing, vc);
+        }
       }
 
       checkAfterMove();
@@ -1905,6 +2033,7 @@ function showPromoteToNinDialog(r, c) {
 // 王家将棋: 金→妊実行（1手消費、妊娠カウンター8セット）
 function executePromoteToNin(r, c) {
   const currentTurn = turn;
+  stopPondering();
   stopHumanThinkTimer();
   const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
   commitThinkTime(currentTurn, elapsed);
@@ -1939,6 +2068,7 @@ function showAbortDialog(r, c) {
 // 王家将棋: 妊解除実行（1手消費、妊→金）
 function executeAbort(r, c) {
   const currentTurn = turn;
+  stopPondering();
   stopHumanThinkTimer();
   const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
   commitThinkTime(currentTurn, elapsed);
@@ -1976,6 +2106,8 @@ function onCellClick(r, c) {
     const drops = getDropSquares(board, selectedHand, currentTurn);
     const valid = drops.some(([dr, dc]) => dr === r && dc === c);
     if (valid) {
+      // Stop pondering for human drop
+      stopPondering();
       // Commit human think time
       stopHumanThinkTimer();
       const elapsed = currentTurn === SENTE ? senteThinkCurrent : goteThinkCurrent;
@@ -2056,6 +2188,9 @@ function onCellClick(r, c) {
 function executeMove(fr, fc, tr, tc, promote, captured) {
   const currentTurn = turn;
   const myHand = currentTurn === SENTE ? senteHand : goteHand;
+
+  // Stop pondering and apply human move to MCTS trees
+  stopPondering();
 
   // Commit human think time
   stopHumanThinkTimer();

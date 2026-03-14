@@ -351,3 +351,146 @@ pub fn mcts_search_root_stats(
         })
     }).collect()
 }
+
+// ============================================================
+// Persistent MCTS tree for pondering and incremental search
+// ============================================================
+
+static mut MCTS_TREE: Option<MctsNode> = None;
+static mut MCTS_VARIANT: GameVariant = GameVariant::Normal;
+
+fn moves_match(a: &ShogiMove, mt: u8, fr: u8, fc: u8, tr: u8, tc: u8, promote: bool, piece: i8) -> bool {
+    a.move_type == mt && a.fr == fr && a.fc == fc && a.tr == tr && a.tc == tc
+        && a.promote == promote && a.piece == piece
+}
+
+fn get_stats_inner(root: &MctsNode) -> Vec<RootChildStat> {
+    root.children.iter().filter_map(|c| {
+        c.move_from_parent.map(|m| RootChildStat {
+            m,
+            visits: c.visit_count,
+            total_value: c.total_value,
+        })
+    }).collect()
+}
+
+/// Initialize a new persistent MCTS tree for the given position
+pub fn mcts_init_tree(
+    board: &Board, s_hand: &Hand, g_hand: &Hand,
+    maximizing: bool, variant: GameVariant,
+) {
+    let root = MctsNode::new(*board, *s_hand, *g_hand, maximizing, None, variant);
+    unsafe {
+        MCTS_TREE = Some(root);
+        MCTS_VARIANT = variant;
+    }
+}
+
+/// Run a batch of simulations on the persistent tree, returns root child stats
+pub fn mcts_run_batch(count: u32) -> Vec<RootChildStat> {
+    unsafe {
+        let variant = MCTS_VARIANT;
+        if let Some(ref mut root) = MCTS_TREE {
+            if root.is_terminal() {
+                return Vec::new();
+            }
+            for _ in 0..count {
+                let mut path = select_path(root);
+                let leaf = get_node_mut(root, &path);
+                let value = if !leaf.is_terminal() {
+                    if !leaf.is_fully_expanded() {
+                        let child_idx = expand_node(leaf, variant);
+                        path.push(child_idx);
+                        simulate_value(&leaf.children[child_idx], variant)
+                    } else {
+                        simulate_value(leaf, variant)
+                    }
+                } else {
+                    simulate_value(leaf, variant)
+                };
+                backpropagate(root, &path, value);
+            }
+            get_stats_inner(root)
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Get current root child statistics without running simulations
+pub fn mcts_get_stats() -> Vec<RootChildStat> {
+    unsafe {
+        if let Some(ref root) = MCTS_TREE {
+            get_stats_inner(root)
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Descend the tree by applying a move (for pondering tree reuse).
+/// Returns true if the child was found (expanded or unexpanded).
+pub fn mcts_apply_move(
+    move_type: u8, fr: u8, fc: u8, tr: u8, tc: u8, promote: bool, piece: i8,
+) -> bool {
+    unsafe {
+        let variant = MCTS_VARIANT;
+        if let Some(mut root) = MCTS_TREE.take() {
+            // Search in expanded children
+            let found_idx = root.children.iter().position(|c| {
+                if let Some(ref m) = c.move_from_parent {
+                    moves_match(m, move_type, fr, fc, tr, tc, promote, piece)
+                } else {
+                    false
+                }
+            });
+
+            if let Some(idx) = found_idx {
+                let child = root.children.swap_remove(idx);
+                MCTS_TREE = Some(child);
+                return true;
+            }
+
+            // Search in unexpanded moves
+            let unexp_idx = root.unexpanded_moves.iter().position(|m| {
+                moves_match(m, move_type, fr, fc, tr, tc, promote, piece)
+            });
+
+            if let Some(idx) = unexp_idx {
+                let m = root.unexpanded_moves[idx];
+                let owner = if root.maximizing { SENTE } else { GOTE };
+                let (nb, nsh, ngh) = apply_move(&root.board, &m, &root.s_hand, &root.g_hand, owner, variant);
+                let child = MctsNode::new(nb, nsh, ngh, !root.maximizing, Some(m), variant);
+                MCTS_TREE = Some(child);
+                return true;
+            }
+
+            // Move not found — clear tree
+            MCTS_TREE = None;
+            false
+        } else {
+            false
+        }
+    }
+}
+
+/// Clear the persistent tree
+pub fn mcts_clear_tree() {
+    unsafe { MCTS_TREE = None; }
+}
+
+/// Check if a persistent tree exists
+pub fn mcts_has_tree() -> bool {
+    unsafe { MCTS_TREE.is_some() }
+}
+
+/// Get the total visit count of the root node
+pub fn mcts_root_visits() -> u32 {
+    unsafe {
+        if let Some(ref root) = MCTS_TREE {
+            root.visit_count
+        } else {
+            0
+        }
+    }
+}
